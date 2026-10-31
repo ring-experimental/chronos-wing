@@ -1,0 +1,4 @@
+# 사람이 읽는 C로 옮긴 함수. 파일 오프셋(Ghidra 주소 - 0x100000)과 위치.
+83694 title.c
+80674 worldmap.c
+805f8 worldmap.c

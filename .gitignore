@@ -1,0 +1,21 @@
+# 원본과 원본 추출물. 복원 소스의 공개 여부와 무관하게 원격에 올리지 않는다.
+*.zip
+*.jar
+client.bin*
+__adf__
+__class__
+
+# 원본 파생물
+work/bin/
+work/decomp/
+work/ghidra/
+work/shots/
+work/wide/
+
+.DS_Store
+
+# 네이티브 빌드: 번역 C와 게임 데이터는 원본 파생물이다.
+native/build/
+work/tools/smaf2ev/target/
+work/tools/smaf2ev/Cargo.lock
+work/saves/
