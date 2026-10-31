@@ -1,5 +1,5 @@
 // 크로노스 윙 네이티브 진입점. SDL3 창, 입력, 시험용 제어 파일.
-// 사용법: chronos <게임 데이터 폴더> [--windowed] [--width <폭>] [--save <폴더>] [--ctrl <파일>] [--soundfont <sf2>]
+// 사용법: chronos [게임 데이터 폴더] [--windowed] [--touch] [--width <폭>] [--save <폴더>] [--ctrl <파일>] [--soundfont <sf2>]
 #include "host.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -26,7 +26,12 @@ static int choose_width(bool windowed) {
     int w = width_arg;
     if (!w && !windowed) {
         const SDL_DisplayMode *m = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
+#ifdef __ANDROID__
+        // 시작 순간에는 세로로 보고될 수 있어 긴 변을 폭으로 쓴다.
+        w = m && m->h ? 320 * SDL_max(m->w, m->h) / SDL_min(m->w, m->h) : 240;
+#else
         w = m && m->h ? 320 * m->w / m->h : 240;
+#endif
     }
     if (w < 240) w = 240;
     if (w > 640) w = 640;
@@ -60,6 +65,12 @@ static void frame_log(const uint8_t *px, int w, int h, int bpl) {
     fclose(o);
 }
 
+void touch_draw(SDL_Renderer *ren, int w, int h);
+void touch_event(SDL_Renderer *ren, SDL_Event *e);
+void touch_release_all(void);
+extern bool touch_enabled;
+bool android_prepare_data(void);
+
 void video_present(uint32_t fb) {
     cpu_t *c = &cpu;
     uint32_t f = handle_data(fb);
@@ -75,6 +86,7 @@ void video_present(uint32_t fb) {
     SDL_UpdateTexture(tex, NULL, px, bpl);
     SDL_RenderClear(ren);
     SDL_RenderTexture(ren, tex, NULL, NULL);
+    touch_draw(ren, w, h);
     SDL_RenderPresent(ren);
 }
 
@@ -107,6 +119,7 @@ static void send_key(int type, int code) {
 
 static int key_from_scancode(SDL_Scancode s) {
     switch (s) {
+    case SDL_SCANCODE_AC_BACK: return -16;
     case SDL_SCANCODE_UP: return -1;
     case SDL_SCANCODE_DOWN: return -2;
     case SDL_SCANCODE_LEFT: return -3;
@@ -130,6 +143,8 @@ static int key_from_scancode(SDL_Scancode s) {
     default: return 0;
     }
 }
+
+void host_key(int type, int code) { send_key(type, code); }
 
 static int key_from_name(const char *n) {
     static const struct { const char *name; int code; } K[] = {{"up",-1},{"down",-2},{"left",-3},{"right",-4},{"ok",-5},{"lsk",-6},{"rsk",-7},{"clear",-16},{"star",'*'},{"hash",'#'}};
@@ -215,6 +230,7 @@ int main(int argc, char **argv) {
     const char *soundfont = NULL, *save = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--windowed")) windowed = true;
+        else if (!strcmp(argv[i], "--touch")) touch_enabled = true;
         else if (!strcmp(argv[i], "--save") && i + 1 < argc) save = argv[++i];
         else if (!strcmp(argv[i], "--width") && i + 1 < argc) width_arg = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--ctrl") && i + 1 < argc) ctrl_path = argv[++i];
@@ -223,8 +239,19 @@ int main(int argc, char **argv) {
     }
     extern FILE *api_trace;
     if (getenv("CHRONOS_TRACE")) api_trace = fopen(getenv("CHRONOS_TRACE"), "w");
-    if (!game_dir[0]) { fprintf(stderr, "사용법: chronos <게임 데이터 폴더> [--windowed]\n"); return 1; }
+#ifdef __ANDROID__
+    touch_enabled = true;
+    windowed = false;
+    SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#endif
+    if (touch_enabled) SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "1");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) { fprintf(stderr, "SDL_Init: %s\n", SDL_GetError()); return 1; }
+#ifdef __ANDROID__
+    if (!android_prepare_data()) { SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "크로노스 윙", "게임 데이터를 풀지 못했습니다.", NULL); return 1; }
+#endif
+    // 인자가 없으면 실행 파일 옆의 game 폴더를 쓴다.
+    if (!game_dir[0]) snprintf(game_dir, sizeof game_dir, "%sgame", SDL_GetBasePath());
     screen_w = choose_width(windowed);
     if (save) snprintf(save_dir, sizeof save_dir, "%s", save);
     else { char *p = SDL_GetPrefPath("chronos-wing", "save"); snprintf(save_dir, sizeof save_dir, "%s", p); SDL_free(p); }
@@ -255,7 +282,9 @@ int main(int argc, char **argv) {
         if (wait > 10 || wait < 0) wait = 10;
         if (SDL_WaitEventTimeout(&e, (int)wait)) {
             do {
+                touch_event(ren, &e);
                 if (e.type == SDL_EVENT_QUIT) running = false;
+                else if (e.type == SDL_EVENT_WILL_ENTER_BACKGROUND) touch_release_all();
                 else if ((e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) && !e.key.repeat) {
                     if (e.key.scancode == SDL_SCANCODE_F11 && e.type == SDL_EVENT_KEY_DOWN) {
                         windowed = !windowed;

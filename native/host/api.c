@@ -4,6 +4,10 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <direct.h>
+#define mkdir(path, mode) _mkdir(path)
+#endif
 
 // 초기화 함수 0x855e8이 각 표 포인터를 저장하는 전역(이미지 주소)과 표 번호.
 static const struct { uint32_t global; uint32_t table; } TABLES[] = {
