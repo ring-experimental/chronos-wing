@@ -86,10 +86,62 @@ static void write_head(const depot_item *it, uint8_t count) {
     ln_wbytes(it->refine, sizeof it->refine);
 }
 
+// 캐쉬샵 구입품을 옮긴다(net/cash_delivery, localnet_cash.c). 창고가 차면 남은 건 다음 목록 때 옮긴다.
+static void cash_delivery_take(void) {
+    enum { RECORD = 4, MAX = 64 };
+    uint8_t buf[RECORD * MAX];
+    long n = ln_load("cash_delivery", buf, sizeof buf);
+    if (n < RECORD) return;
+    long done = 0;
+    for (; done + RECORD <= n; done += RECORD) {
+        depot_item *it = depot_add();
+        if (!it) break;
+        depot_item_defaults(it);
+        it->kind = (int8_t)buf[done];
+        it->id = (int16_t)(buf[done + 1] << 8 | buf[done + 2]);
+        it->count = buf[done + 3];
+    }
+    if (!done) return;
+    depot_save();
+    ln_save("cash_delivery", buf + done, (size_t)(n - done));
+}
+
+// 우편 첨부와 오가는 25바이트는 write_head와 같은 순서다. 형식에 팔레트 내용이 없어 염색품과 경매 중인 물건은 첨부할 수 없다.
+bool ln_depot_take(uint64_t uid, uint8_t rec[LN_ITEM_SIZE]) {
+    depot_item *it = depot_find((uint32_t)uid);
+    if (!it || it->listed || it->pal_len) return false;
+    memset(rec, 0, LN_ITEM_SIZE);
+    rec[4] = (uint8_t)(it->uid >> 24); rec[5] = (uint8_t)(it->uid >> 16); rec[6] = (uint8_t)(it->uid >> 8); rec[7] = (uint8_t)it->uid;
+    rec[8] = (uint8_t)it->kind;
+    rec[9] = (uint8_t)((uint16_t)it->id >> 8); rec[10] = (uint8_t)it->id;
+    rec[11] = it->count;
+    rec[12] = auction_kind_allowed(it->kind) ? 2 : 0;
+    memcpy(rec + 13, it->opt, sizeof it->opt);
+    rec[18] = (uint8_t)(it->serial >> 24); rec[19] = (uint8_t)(it->serial >> 16); rec[20] = (uint8_t)(it->serial >> 8); rec[21] = (uint8_t)it->serial;
+    memcpy(rec + 22, it->refine, sizeof it->refine);
+    depot_remove(it);
+    depot_save();
+    return true;
+}
+
+bool ln_depot_put(const uint8_t rec[LN_ITEM_SIZE]) {
+    depot_item *it = depot_add();
+    if (!it) return false;
+    it->kind = (int8_t)rec[8];
+    it->id = (int16_t)(rec[9] << 8 | rec[10]);
+    it->count = rec[11];
+    memcpy(it->opt, rec + 13, sizeof it->opt);
+    it->serial = (uint32_t)rec[18] << 24 | rec[19] << 16 | rec[20] << 8 | rec[21];
+    memcpy(it->refine, rec + 22, sizeof it->refine);
+    depot_save();
+    return true;
+}
+
 static void list_items(ln_req *q) {
     int page = (int8_t)ln_u8(q);
     if (page < 0 || page >= DEPOT_PAGES) page = 0;
     auction_settle();
+    cash_delivery_take();
     int n;
     const depot_item *items = depot_items(&n);
     int first = page * DEPOT_PAGE_ITEMS, shown = n - first;

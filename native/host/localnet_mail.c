@@ -276,17 +276,6 @@ void ln_mail_add_name(const char *name) {
     box_save();
 }
 
-// 창고(localnet_depot.c)가 같은 이름을 정의하면 그쪽이 쓰인다. 그전에는 첨부를 옮길 곳이 없어 실패로 돌려준다.
-__attribute__((weak)) bool ln_depot_take(uint64_t uid, uint8_t rec[LN_ITEM_SIZE]) {
-    (void)uid; (void)rec;
-    return false;
-}
-
-__attribute__((weak)) bool ln_depot_put(const uint8_t rec[LN_ITEM_SIZE]) {
-    (void)rec;
-    return false;
-}
-
 bool ln_mail(ln_req *q) {
     box_load();
     switch (q->minor) {

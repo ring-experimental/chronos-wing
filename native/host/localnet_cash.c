@@ -4,7 +4,7 @@
 #include <string.h>
 #include <time.h>
 
-enum { DELIVERY_RECORD = 4, DELIVERY_MAX = 64, SMS_ADD = 10, SMS_MAX = 9999, DOUBLE_ADD = 5, DOUBLE_MAX = 99, NP_ADD = 1000, DAY = 86400 };
+enum { DELIVERY_RECORD = 4, DELIVERY_MAX = 64, SMS_ADD = 10, DOUBLE_ADD = 5, DOUBLE_MAX = 99, NP_ADD = 1000, DAY = 86400 };
 
 typedef enum { TO_DEPOT, TO_NP, TO_DOUBLE, TO_SHIELD, TO_SMS } target;
 
@@ -68,36 +68,6 @@ static bool deliver(const product *p) {
     return ln_save("cash_delivery", buf, (size_t)n + DELIVERY_RECORD);
 }
 
-// 프로필의 분 값은 저장만 하면 줄지 않는다. 끝나는 시각을 net/cash_shield에 두고 프로필을 쓸 때마다 다시 계산한다.
-void ln_cash_tick(void) {
-    int64_t end;
-    if (ln_load("cash_shield", &end, sizeof end) != (long)sizeof end) return;
-    ln_profile *p = ln_me();
-    int64_t left = end - (int64_t)time(NULL);
-    int32_t min = left > 0 ? (int32_t)((left + 59) / 60) : -1;
-    if (p->shield_min == min) return;
-    p->shield_min = min;
-    ln_me_save();
-}
-
-static bool shield_extend(void) {
-    int64_t end = 0, now = (int64_t)time(NULL);
-    if (ln_load("cash_shield", &end, sizeof end) != (long)sizeof end || end < now) end = now;
-    end += DAY;
-    if (!ln_save("cash_shield", &end, sizeof end)) return false;
-    ln_cash_tick();
-    return true;
-}
-
-// net/sms_left: 남은 건수 int32. 1.33(0x152aec의 be16)이 읽어 보낸다.
-static bool sms_add(void) {
-    int32_t left = 0;
-    if (ln_load("sms_left", &left, sizeof left) != (long)sizeof left) left = 0;
-    if (left + SMS_ADD > SMS_MAX) return false;
-    left += SMS_ADD;
-    return ln_save("sms_left", &left, sizeof left);
-}
-
 static void list(void) {
     ln_begin(1, 40, 0);
     ln_w8(PRODUCT_COUNT);
@@ -146,16 +116,10 @@ static void buy(ln_req *q) {
         ln_me_save();
         break;
     case TO_SHIELD:
-        if (!shield_extend()) {
-            ln_fail(1, 41, MSG_SAVE_FAILED);
-            return;
-        }
+        ln_shield_add(DAY / 60);
         break;
     case TO_SMS:
-        if (!sms_add()) {
-            ln_fail(1, 41, MSG_FULL);
-            return;
-        }
+        ln_sms_add(SMS_ADD);
         break;
     }
     ln_begin(1, 41, 0);

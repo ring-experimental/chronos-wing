@@ -137,7 +137,10 @@ static void st_load(void) {
     st.magic = STATE_MAGIC;
     st.rng = 0x9e3779b97f4a7c15ULL ^ (uint64_t)time(NULL);
     st.last_tick = (int64_t)time(NULL);
-    for (int i = 0; i < CAPTAIN_N; i++) st.fame[i] = captain_base_fame(i);
+    for (int i = 0; i < CAPTAIN_N; i++) {
+        st.fame[i] = captain_base_fame(i);
+        ln_mail_add_name(NAMES[i]); // 편지쓰기의 받는 사람으로 인정한다
+    }
 }
 
 static int find_uid(uint64_t uid) {
@@ -347,6 +350,7 @@ static void log_add(const char *title, const char *body) {
     snprintf(st.log[st.log_n].title, sizeof st.log[0].title, "%s", title);
     snprintf(st.log[st.log_n].body, sizeof st.log[0].body, "%s", body);
     st.log_n++;
+    ln_notice_add(title, body);
 }
 
 static void settle(ln_req *q) {
@@ -404,15 +408,10 @@ static void counter_decline(void) {
 }
 
 static void my_shadow(void) { // 2.8 모의전투. 배치된 방어 부대만 나온다.
-    int n, placed = 0;
-    ln_member *m = ln_members(&n);
-    for (int i = 0; i < n; i++) if (m[i].floor >= 0 && m[i].room >= 0 && m[i].slot >= 0) placed++;
-    if (!placed) { ln_fail(2, 8, MSG_NO_ROSTER); return; }
+    const ln_member *d[LN_DEFENSE_MAX];
+    if (!ln_defense(d, LN_DEFENSE_MAX)) { ln_fail(2, 8, MSG_NO_ROSTER); return; }
     ln_begin(2, 8, 0);
-    ln_w8((uint8_t)placed);
-    for (int i = 0; i < n; i++)
-        if (m[i].floor >= 0 && m[i].room >= 0 && m[i].slot >= 0)
-            w_defender(m[i].uid, m[i].id, m[i].level, m[i].name, m[i].floor, m[i].room, m[i].slot, m[i].fatigue, m[i].hp, m[i].attack, m[i].pdef, m[i].mdef, m[i].crit);
+    ln_write_defense();
     ln_w32((uint32_t)ln_me()->limit_attack); // 0x214
     ln_send();
 }
@@ -468,17 +467,11 @@ static int virtual_attack(void) {
         c = (int)(rnd() % CAPTAIN_N);
         for (int i = 0; i < CAPTAIN_N; i++) { int k = (c + i) % CAPTAIN_N; if (captain_level(k) == level) { c = k; break; } }
     }
-    int n, power = 0;
-    ln_member *m = ln_members(&n);
-    bool changed = false;
-    for (int i = 0; i < n; i++)
-        if (m[i].floor >= 0 && m[i].room >= 0 && m[i].slot >= 0) {
-            power += m[i].level;
-            int f = m[i].fatigue + FATIGUE_PER_FIGHT;
-            m[i].fatigue = (uint8_t)(f > 100 ? 100 : f);
-            changed = true;
-        }
-    if (changed) ln_members_save();
+    const ln_member *d[LN_DEFENSE_MAX];
+    int n = ln_defense(d, LN_DEFENSE_MAX), power = 0;
+    int64_t uids[LN_DEFENSE_MAX];
+    for (int i = 0; i < n; i++) { power += d[i]->level; uids[i] = d[i]->uid; }
+    for (int i = 0; i < n; i++) ln_unit_fatigue_add(uids[i], FATIGUE_PER_FIGHT);
     bool held = power > 0 && power + (int)(rnd() % 20) > hero_level() + captain_level(c) * 2 + 10;
     char title[TITLE_MAX + 1];
     p->hit += 1;
@@ -531,6 +524,11 @@ void ln_shadow_tick(void) {
     int64_t elapsed = now - st.last_tick;
     if (elapsed < ATTACK_EVERY_SEC) {
         if (dirty) st_save();
+        return;
+    }
+    if (ln_is_protected()) { // 휴면과 보호쉴드 중에는 공격받지 않는다. 그동안의 시간은 넘긴다.
+        st.last_tick = now;
+        st_save();
         return;
     }
     int count = (int)(elapsed / ATTACK_EVERY_SEC);
