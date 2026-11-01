@@ -1,5 +1,6 @@
 // WIPI C 표 설치와 분배. 표 번호와 슬롯은 work/wipi-api.md 참고.
 #include "host.h"
+#include "localnet.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -284,9 +285,9 @@ static void api_net(cpu_t *c, uint32_t i) {
             r[0] = 0;
             break;
         }
-        defer_call(r[0], (uint32_t)-1, r[1], 1); r[0] = 0; break;
-    case 1: r[0] = 0; break;
-    default: r[0] = (uint32_t)-1;
+        localnet_api(i);
+        break;
+    default: localnet_api(i);
     }
 }
 
