@@ -19,6 +19,7 @@ static uint64_t frames;
 extern float audio_peak;
 
 static int width_arg;
+enum { ANDROID_INPUT_POLL_MS = 8 };
 
 void request_exit(void) { running = false; }
 SDL_Window *host_window(void) { return win; }
@@ -294,7 +295,7 @@ static void load_image(void) {
     if (!f) { SDL_Log("%s 없음", path); exit(1); }
     size_t n = fread(c->m + IMAGE_LOAD, 1, 0x100000, f);
     fclose(f);
-    // 원본 시작 코드(0xc)가 하는 재배치와 같다. BSS는 calloc으로 이미 0이다.
+    // 원본 시작 코드(0xc)가 하는 재배치와 같다. BSS는 새로 받은 페이지라 이미 0이다.
     uint32_t relocs = R32(IMAGE_LOAD + 0x70), base = IMAGE_LOAD + 0x74 + relocs * 4;
     for (uint32_t i = 0; i < relocs; i++) {
         uint32_t o = base + R32(IMAGE_LOAD + 0x74 + i * 4);
@@ -303,6 +304,18 @@ static void load_image(void) {
     uint32_t got0 = R32(base), got1 = R32(base + 4); // 머리 값도 위에서 재배치됐다.
     for (uint32_t o = got0; o < got1; o += 4) W32(o, R32(o) + base);
     fprintf(stderr, "이미지 %zu바이트 적재, 기준 %#x, GOT %#x-%#x\n", n, base, got0, got1);
+}
+
+// Android의 SDL_WaitEventTimeout은 잠들지 않고 시간이 될 때까지 돌아 코어 하나를 다 쓴다. 직접 재우고 입력은 짧은 간격으로 본다.
+static bool wait_event(SDL_Event *e, int ms) {
+#ifdef __ANDROID__
+    if (SDL_PollEvent(e)) return true;
+    if (ms > ANDROID_INPUT_POLL_MS) ms = ANDROID_INPUT_POLL_MS;
+    if (ms > 0) SDL_Delay(ms);
+    return SDL_PollEvent(e);
+#else
+    return SDL_WaitEventTimeout(e, ms);
+#endif
 }
 
 int main(int argc, char **argv) {
@@ -348,8 +361,7 @@ int main(int argc, char **argv) {
     snprintf(ui_cfg, sizeof ui_cfg, "%s/../ui.ini", save_dir);
     if (!ui_init(win, ren, ui_dir, ui_cfg, force_pad)) SDL_Log("UI를 열지 못함: 패드와 설정 없이 진행");
 
-    cpu.m = calloc(1, GUEST_MEM);
-    cpu.memsz = GUEST_MEM;
+    guest_mem_alloc();
     cpu.SP = STACK_TOP - 16;
     load_image();
     heap_init();
@@ -363,8 +375,10 @@ int main(int argc, char **argv) {
     while (running) {
         SDL_Event e;
         int64_t wait = timers_next_ms();
-        if (wait > 10 || wait < 0) wait = 10;
-        if (SDL_WaitEventTimeout(&e, (int)wait)) {
+        // 시험용 제어 파일만 짧게 폴링한다. 평소에는 입력이나 다음 타이머까지 잔다.
+        int64_t max_wait = ctrl_path ? 10 : 100;
+        if (wait > max_wait || wait < 0) wait = max_wait;
+        if (wait_event(&e, (int)wait)) {
             do {
                 if (e.type == SDL_EVENT_QUIT) { SDL_Log("종료 이벤트"); running = false; }
                 else if (e.type == SDL_EVENT_WILL_ENTER_BACKGROUND) ui_release_all();

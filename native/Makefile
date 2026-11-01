@@ -14,7 +14,8 @@ RML = $(B)/deps/$(1)/install
 RMLLIBS := -lrmlui -lfreetype
 RESTSRC := $(wildcard restored/*.c)
 RESTOBJ := $(RESTSRC:restored/%.c=$(B)/r_%.o)
-TRFLAGS ?= -DTRACE_PC
+# 디버깅: make TRFLAGS=-DTRACE_PC 면 접근마다 범위를 검사하고 pc를 남긴다.
+TRFLAGS ?=
 CFLAGS := -O2 -g -w -std=gnu11 -Ihost -I/opt/homebrew/include
 LDFLAGS := -L/opt/homebrew/lib -lSDL3
 

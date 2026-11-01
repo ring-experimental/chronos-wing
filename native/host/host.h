@@ -8,6 +8,7 @@
 #define STACK_TOP 0x400000u
 #define HEAP_START 0x400000u
 #define GUEST_MEM 0x4000000u
+#define GUEST_LOW 0x100000u
 #define API_BASE 0xf0000000u
 
 extern cpu_t cpu;
@@ -25,6 +26,8 @@ void api_dispatch(cpu_t *c, uint32_t table, uint32_t index);
 void api_install(void);
 
 // 메모리
+extern uint32_t host_last_call;
+void guest_mem_alloc(void);
 void heap_init(void);
 uint32_t heap_alloc(uint32_t size);
 void heap_free(uint32_t addr);

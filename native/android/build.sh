@@ -33,7 +33,7 @@ for f in host/*.cpp; do
   [[ $o -nt $f && $o -nt host/ui.h && $o -nt host/ui_render.h ]] || $CC++ -O2 -w -fPIC -std=c++17 -DRMLUI_STATIC_LIB $INC -I$RML/include -c $f -o $o &
 done
 tr=$O/obj/tr.o; OBJS+=$tr
-[[ $tr -nt $B/tr.c ]] || $CC -O1 -w -fPIC -std=gnu11 -Ihost -c $B/tr.c -o $tr &
+[[ $tr -nt $B/tr.c ]] || $CC -O1 -w -fPIC -fvisibility=hidden -std=gnu11 -Ihost -c $B/tr.c -o $tr &
 wait
 $CC++ -shared -static-libstdc++ -Wl,-z,max-page-size=16384 $OBJS -L$O/lib/lib/$ABI -L$RML/lib -lrmlui -lfreetype -lSDL3 -lm -landroid -llog -o $O/lib/lib/$ABI/libmain.so
 

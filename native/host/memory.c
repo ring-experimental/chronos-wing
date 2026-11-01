@@ -1,8 +1,45 @@
 // 게스트 힙. 주소순 빈 목록, 인접 블록 병합. 머리 8바이트에 크기를 둔다.
 #include "host.h"
+#include <stdio.h>
+#include <stdlib.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <signal.h>
+#include <sys/mman.h>
+#endif
 
 static uint32_t free_head;
 #define HDR 8u
+
+// 32비트 주소 전체를 예약하고 게스트 영역만 연다. 번역 코드가 접근마다 범위를 검사하지 않아도 잘못된 주소는 보호 페이지에서 멈춘다.
+#define GUEST_RESERVE 0x100010000ull
+
+#ifndef _WIN32
+static void on_fault(int sig, siginfo_t *si, void *uc) {
+    (void)uc;
+    uint64_t off = (uint64_t)(uintptr_t)si->si_addr - (uint64_t)(uintptr_t)cpu.m;
+    if (off < GUEST_RESERVE) fprintf(stderr, "게스트 메모리 오류: 주소 %#llx, 마지막 간접 호출 %#x\n", (unsigned long long)off, host_last_call);
+    signal(sig, SIG_DFL); // 복귀하면 같은 자리에서 기본 동작으로 죽는다.
+}
+#endif
+
+void guest_mem_alloc(void) {
+#ifdef _WIN32
+    uint8_t *p = VirtualAlloc(NULL, GUEST_RESERVE, MEM_RESERVE, PAGE_NOACCESS);
+    if (!p || !VirtualAlloc(p + GUEST_LOW, GUEST_MEM - GUEST_LOW, MEM_COMMIT, PAGE_READWRITE)) { fprintf(stderr, "게스트 메모리 예약 실패\n"); exit(1); }
+#else
+    uint8_t *p = mmap(NULL, GUEST_RESERVE, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (p == MAP_FAILED || mprotect(p + GUEST_LOW, GUEST_MEM - GUEST_LOW, PROT_READ | PROT_WRITE)) { perror("게스트 메모리 예약 실패"); exit(1); }
+    struct sigaction sa = {0};
+    sa.sa_sigaction = on_fault;
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+#endif
+    cpu.m = p;
+    cpu.memsz = GUEST_MEM;
+}
 
 void heap_init(void) {
     cpu_t *c = &cpu;

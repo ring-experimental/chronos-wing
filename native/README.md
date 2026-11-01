@@ -26,6 +26,7 @@ Android는 첫 실행 때 APK 안의 데이터를 푼다. 뒤로 키는 CLEAR다
 
 - `build/`는 원본 파생물이라 저장소에 넣지 않는다. 원본과 빌드 묶음을 공개하지 않는다.
 - `run_test.sh`, `stress.sh`: 제어 파일로 키를 넣는 자동 시험. 저장 폴더를 따로 쓴다.
+- 번역 코드는 레지스터와 플래그를 지역 변수로 두고 호출과 복귀 때만 `cpu`와 맞춘다. 메모리 범위 검사 대신 보호 페이지를 쓴다. `make TRFLAGS=-DTRACE_PC`로 tr.o를 만들면 접근마다 검사하고 오류 때 pc를 남긴다.
 - `CHRONOS_TRACE=<파일>`: API 호출을 WIE `wipic call` 로그와 같은 형식으로 남긴다. `work/tools/apidiff.py`로 비교한다.
 
 ## 세이브 옮기기
