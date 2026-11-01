@@ -105,6 +105,20 @@ void ln_upload_set(const uint8_t *body, size_t n);
 // 동료 슬롯(0~9)의 합류 여부. 4.1 본문 오프셋 53부터 슬롯마다 10바이트다.
 bool ln_upload_joined(int slot);
 
+// 우편(localnet_mail.c). 저장은 net/mail이다. 문자열은 EUC-KR이고 칸보다 길면 글자 단위로 자른다.
+// 개인공지 한 건을 넣는다. 공략 결과("어떤 유저가 나를 공격했는지, 방어는 성공했는지", MAP/NT/000)를 여기로 남긴다.
+// 제목은 49바이트, 본문은 199바이트까지이고 게임 표기(;는 줄바꿈, q r p { & }는 색)를 그대로 쓴다.
+void ln_notice_add(const char *title, const char *body);
+// 플레이어 대신 만든 상대의 이름(10바이트)을 알린다. 편지쓰기에서 이 이름은 받는 사람으로 인정한다.
+void ln_mail_add_name(const char *name);
+
+// 창고 항목 하나. 응답 3.1(0x153d68)의 항목 25바이트 그대로이고 앞 8바이트가 uid다. 우편의 첨부가 이 형식으로 오간다.
+enum { LN_ITEM_SIZE = 25 };
+// 창고에서 uid 항목을 빼서 돌려준다. 없으면 false.
+bool ln_depot_take(uint64_t uid, uint8_t rec[LN_ITEM_SIZE]);
+// 창고에 넣는다. uid는 창고가 새로 정한다. 자리가 없으면 false.
+bool ln_depot_put(const uint8_t rec[LN_ITEM_SIZE]);
+
 // 기능별 처리기. 처리했으면 true, 모르는 소분류면 false.
 bool ln_session(ln_req *q); // 대분류 10
 bool ln_mail(ln_req *q);    // 대분류 1, 소분류 1~11
