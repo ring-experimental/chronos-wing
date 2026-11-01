@@ -54,6 +54,14 @@ uint64_t now_ms(void);
 
 // 표시
 void video_present(uint32_t fb_handle);
+// restored/dialog.c
+bool dialog_auto(void);
+void dialog_set_auto(bool on);
+void dialog_auto_tick(void);
+bool dialog_log_is_open(void);
+void dialog_log_toggle(void);
+void dialog_log_scroll(int rows);
+bool dialog_log_key(int type, int code);
 void host_key(int type, int code);
 void audio_pause(bool paused);
 struct SDL_Window *host_window(void);

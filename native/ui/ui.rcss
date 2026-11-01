@@ -4,6 +4,8 @@ div, span, h1, button, input { display: block; }
 span { display: inline-block; }
 
 .group { position: absolute; }
+/* 대사 중 하단 터치 영역. 버튼들보다 먼저 놓여 그 아래에 깔린다. */
+#tap { position: absolute; left: 0; top: 45%; width: 100%; height: 55%; }
 .group.edit { background-color: #ffffff30; border-radius: 0.15em; }
 .group.selected { background-color: #ffc83d80; }
 

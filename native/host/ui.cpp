@@ -12,6 +12,11 @@ extern "C" void host_key(int type, int code);
 extern "C" bool game_in_dialog(void);
 extern "C" bool devmode_hud_top(void);
 extern "C" bool game_shortcuts_bought(void);
+extern "C" bool dialog_auto(void);
+extern "C" void dialog_set_auto(bool on);
+extern "C" bool dialog_log_is_open(void);
+extern "C" void dialog_log_toggle(void);
+extern "C" void dialog_log_scroll(int rows);
 
 namespace {
 
@@ -37,16 +42,19 @@ Group groups[] = {
     {"slot1", UNPLACED, UNPLACED, 0.8f, 0.8f},
     {"slot3", UNPLACED, UNPLACED, 0.8f, 0.8f},
     {"slot0", UNPLACED, UNPLACED, 0.8f, 0.8f},
+    {"auto", 0.91f, 0.48f, 1.6f, 0.8f},
+    {"log", 0.91f, 0.36f, 1.6f, 0.8f},
 };
 constexpr int SYS_GROUP = 4, AUX_GROUP = 3, FIRST_SLOT = 8, SLOT_COUNT = 3;
 constexpr float SLOT_PITCH_EM = 0.85f;
 constexpr float BASE_DP = 34.f;
+constexpr float LOG_ROW_RATIO = 14.f / 320.f; // 대사 기록 한 줄의 높이. 끌어서 넘길 때 쓴다.
 constexpr float HUD_TOP_RATIO = 35.f / 320.f; // 상단 상태창 높이. 왼쪽 위 설정 버튼을 그만큼 내린다.
 bool hud_top = false;
 
 // 데이터 모델 "ui"에 묶이는 값. 화면 표시는 문서의 data-* 바인딩이 결정한다.
 struct Model {
-    bool pad_on = false, dialog = false, edit = false, shortcuts = false;
+    bool pad_on = false, dialog = false, edit = false, shortcuts = false, auto_on = false, log = false;
     int size = 100, alpha = 85, selected = -1;
 } model;
 
@@ -65,7 +73,7 @@ Finger fingers[10];
 void save_config() {
     FILE *f = fopen(cfg_path.c_str(), "w");
     if (!f) return;
-    fprintf(f, "pad %d\nsize %d\nopacity %d\n", model.pad_on, model.size, model.alpha);
+    fprintf(f, "pad %d\nsize %d\nopacity %d\nautoplay %d\n", model.pad_on, model.size, model.alpha, dialog_auto());
     for (auto &g : groups) fprintf(f, "%s %.4f %.4f %.3f\n", g.id, g.x, g.y, g.scale);
     fclose(f);
 }
@@ -86,6 +94,7 @@ void load_config(bool default_pad) {
         if (n == 2 && !strcmp(name, "pad")) model.pad_on = a != 0;
         else if (n == 2 && !strcmp(name, "size")) model.size = (int)std::clamp(a, 50.f, 200.f);
         else if (n == 2 && !strcmp(name, "opacity")) model.alpha = (int)std::clamp(a, 10.f, 100.f);
+        else if (n == 2 && !strcmp(name, "autoplay")) dialog_set_auto(a != 0);
         else if (n == 4) for (auto &g : groups) if (!strcmp(g.id, name)) { g.x = a < 0 ? UNPLACED : std::clamp(a, 0.f, 1.f); g.y = b < 0 ? UNPLACED : std::clamp(b, 0.f, 1.f); g.scale = std::clamp(c, 0.5f, 2.5f); }
     }
     fclose(f);
@@ -156,6 +165,8 @@ void bind_model() {
     m.Bind("g", &refs);
     m.Bind("dialog", &model.dialog);
     m.Bind("shortcuts", &model.shortcuts);
+    m.Bind("auto_on", &model.auto_on);
+    m.Bind("log", &model.log);
     m.Bind("edit", &model.edit);
     m.Bind("selected", &model.selected);
     m.Bind("pad_on", &model.pad_on);
@@ -201,6 +212,8 @@ void press(Rml::Element *b) {
     if (b->HasAttribute("action")) {
         std::string a = b->GetAttribute<Rml::String>("action", "");
         if (a == "settings") ui_toggle_settings();
+        else if (a == "auto") ui_toggle_auto();
+        else if (a == "log") dialog_log_toggle();
         return;
     }
     int n = b->GetAttribute<int>("presses", 0);
@@ -237,10 +250,16 @@ void finger_event(const SDL_Event *e) {
             f->grab_y = groups[g].y - y / out_h;
         } else {
             f->button = button_at(x, y);
+            f->grab_y = y;
             press(f->button);
         }
     } else if (f && e->type == SDL_EVENT_FINGER_MOTION) {
-        if (model.edit) {
+        if (!model.edit && !f->button && dialog_log_is_open()) {
+            // 대사 기록은 끌어서 넘긴다. 손가락을 올리면 아래 줄이 보인다.
+            float row = LOG_ROW_RATIO * out_h;
+            int rows = (int)((f->grab_y - y) / row);
+            if (rows) { dialog_log_scroll(rows); f->grab_y -= rows * row; }
+        } else if (model.edit) {
             if (f->group >= 0) {
                 groups[f->group].x = std::clamp(x / out_w + f->grab_x, 0.f, 1.f);
                 groups[f->group].y = std::clamp(y / out_h + f->grab_y, 0.f, 1.f);
@@ -275,6 +294,11 @@ extern "C" void ui_toggle_settings(void) {
     ui_release_all();
     if (settings->IsVisible()) { settings->Hide(); save_config(); }
     else show_settings();
+}
+
+extern "C" void ui_toggle_auto(void) {
+    dialog_set_auto(!dialog_auto());
+    if (ctx) save_config();
 }
 
 extern "C" bool ui_init(SDL_Window *win, SDL_Renderer *ren, const char *ui_dir, const char *config_path, bool force_pad) {
@@ -355,6 +379,15 @@ extern "C" void ui_render(void) {
     if (shortcuts != model.shortcuts) {
         model.shortcuts = shortcuts;
         handle.DirtyVariable("shortcuts");
+    }
+    if (dialog_auto() != model.auto_on) {
+        model.auto_on = dialog_auto();
+        handle.DirtyVariable("auto_on");
+    }
+    if (dialog_log_is_open() != model.log) {
+        model.log = !model.log;
+        ui_release_all();
+        handle.DirtyVariable("log");
     }
     ctx->Update();
     ctx->Render();

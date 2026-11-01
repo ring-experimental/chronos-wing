@@ -27,3 +27,5 @@
 3b52c bag.c
 41d00 hud.c wrap
 44284 hud.c wrap
+1bde0 dialog.c wrap
+19e30 dialog.c wrap

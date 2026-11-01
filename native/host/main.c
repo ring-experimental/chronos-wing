@@ -154,6 +154,7 @@ static void write_shot(const char *path) {
 }
 
 static void send_key(int type, int code) {
+    if (dialog_log_key(type, code)) return;
     uint32_t a[3] = {(uint32_t)type, (uint32_t)code, 0};
     guest_call(FN_INPUT, a, 3);
 }
@@ -400,6 +401,8 @@ int main(int argc, char **argv) {
                         SDL_SetWindowFullscreen(win, !windowed);
                         continue;
                     }
+                    if (e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_TAB) { ui_toggle_auto(); continue; }
+                    if (e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_L) { dialog_log_toggle(); continue; }
                     int k = key_from_scancode(e.key.scancode);
                     if (k) send_key(e.type == SDL_EVENT_KEY_DOWN ? 2 : 3, k);
                 }
@@ -411,8 +414,13 @@ int main(int argc, char **argv) {
         // 설정 중이나 파일 창이 열린 동안에는 게임을 멈춘다.
         bool modal = ui_modal() || savefile_dialog_open();
         if (modal != paused) { paused = modal; audio_pause(paused); }
-        if (!paused) timers_run();
-        if (frame_dirty || paused) render_frame();
+        // 대사 기록 창이 열린 동안에도 게임을 멈춘다. 음악은 계속 나온다.
+        bool frozen = dialog_log_is_open();
+        if (!paused && !frozen) {
+            dialog_auto_tick();
+            timers_run();
+        }
+        if (frame_dirty || paused || frozen) render_frame();
     }
     SDL_Log("메인 루프 끝, 프레임 %llu", (unsigned long long)frames);
     fprintf(stderr, "종료, 프레임 %llu, 소리 최대값 %.3f\n", (unsigned long long)frames, audio_peak);
