@@ -122,6 +122,7 @@ bool ln_mail(ln_req *q);    // 대분류 1, 소분류 1~11
 bool ln_staff(ln_req *q);   // 대분류 1, 소분류 20~27
 bool ln_sleep(ln_req *q);   // 대분류 1, 소분류 30~33
 bool ln_cash(ln_req *q);    // 대분류 1, 소분류 40~41
+void ln_cash_tick(void);    // 보호쉴드 남은 분을 다시 계산한다. 프로필을 쓰기 전에 부른다.
 bool ln_shadow(ln_req *q);  // 대분류 2
 bool ln_depot(ln_req *q);   // 대분류 3, 소분류 1~8
 bool ln_auction(ln_req *q); // 대분류 3, 소분류 20~21
