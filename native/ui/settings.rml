@@ -1,0 +1,16 @@
+<rml>
+<head><link type="text/rcss" href="ui.rcss"/><title>settings</title></head>
+<body class="modal" data-model="ui">
+  <div class="panel">
+    <h1>화면 패드 설정</h1>
+    <div class="row"><span>패드 사용</span><input type="checkbox" data-checked="pad_on" data-event-change="save"/></div>
+    <div class="row"><span>크기</span><input type="range" min="50" max="200" step="5" data-value="pad_size"/></div>
+    <div class="row"><span>투명도</span><input type="range" min="10" max="100" step="5" data-value="alpha" data-event-change="save"/></div>
+    <div class="buttons">
+      <button data-event-click="open_edit">위치 편집</button>
+      <button data-event-click="reset">초기화</button>
+      <button data-event-click="close">닫기</button>
+    </div>
+  </div>
+</body>
+</rml>

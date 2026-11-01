@@ -7,6 +7,11 @@ B := build
 GAME := $(B)/game
 HOSTSRC := $(wildcard host/*.c)
 HOSTOBJ := $(HOSTSRC:host/%.c=$(B)/%.o)
+UISRC := $(wildcard host/*.cpp)
+UIOBJ := $(UISRC:host/%.cpp=$(B)/%.o)
+UIDEPS := host/ui.h host/ui_render.h
+RML = $(B)/deps/$(1)/install
+RMLLIBS := -lrmlui -lfreetype
 RESTSRC := $(wildcard restored/*.c)
 RESTOBJ := $(RESTSRC:restored/%.c=$(B)/r_%.o)
 TRFLAGS ?= -DTRACE_PC
@@ -14,7 +19,7 @@ CFLAGS := -O2 -g -w -std=gnu11 -Ihost -I/opt/homebrew/include
 LDFLAGS := -L/opt/homebrew/lib -lSDL3
 
 .PHONY: all windows android
-all: $(B)/chronos $(GAME)/client.bin $(B)/game.ev $(B)/1mgm.sf2
+all: $(B)/chronos $(GAME)/client.bin $(B)/game.ev $(B)/1mgm.sf2 $(B)/ui
 
 $(GAME)/client.bin: $(ZIP)
 	mkdir -p $(GAME)
@@ -34,12 +39,21 @@ $(B)/tr.o: $(B)/tr.c host/thumbrt.h
 $(B)/r_%.o: restored/%.c restored/restored.h host/host.h host/thumbrt.h
 	cc $(CFLAGS) -c $< -o $@
 
-$(B)/%.o: host/%.c host/host.h host/thumbrt.h
+$(B)/%.o: host/%.c host/host.h host/thumbrt.h host/ui.h
 	mkdir -p $(B)
 	cc $(CFLAGS) -c $< -o $@
 
-$(B)/chronos: $(B)/tr.o $(HOSTOBJ) $(RESTOBJ)
-	cc $^ $(LDFLAGS) -lm -o $@
+$(B)/chronos: $(B)/tr.o $(HOSTOBJ) $(RESTOBJ) $(UIOBJ) $(call RML,mac)/lib/librmlui.a
+	c++ $(filter %.o,$^) $(LDFLAGS) -L$(call RML,mac)/lib $(RMLLIBS) -lm -o $@
+
+$(call RML,mac)/lib/librmlui.a:
+	./deps.sh mac
+
+$(B)/%.o: host/%.cpp $(UIDEPS) $(call RML,mac)/lib/librmlui.a
+	c++ -O2 -g -std=c++17 -DRMLUI_STATIC_LIB -Ihost -I/opt/homebrew/include -I$(call RML,mac)/include -c $< -o $@
+
+$(B)/ui: $(wildcard ui/*)
+	rm -rf $@ && cp -R ui $@ && touch $@
 
 # MMF를 이벤트로 바꾸는 도구는 빌드 때만 쓴다(smaf-player, MIT). 결과만 실행 파일 옆에 둔다.
 $(B)/game.ev: $(GAME)/client.bin
@@ -49,15 +63,25 @@ $(B)/game.ev: $(GAME)/client.bin
 WIN := $(B)/win
 WCC := x86_64-w64-mingw32-gcc
 WSDL := $(B)/deps/mingw/x86_64-w64-mingw32
-WOBJ := $(HOSTSRC:host/%.c=$(WIN)/obj/%.o) $(RESTSRC:restored/%.c=$(WIN)/obj/r_%.o)
+WOBJ := $(HOSTSRC:host/%.c=$(WIN)/obj/%.o) $(RESTSRC:restored/%.c=$(WIN)/obj/r_%.o) $(UISRC:host/%.cpp=$(WIN)/obj/%.o)
+WRML := $(call RML,win)
 
 windows: $(WIN)/chronos.exe $(GAME)/client.bin $(B)/game.ev $(B)/1mgm.sf2
 	cp $(WSDL)/bin/SDL3.dll $(B)/game.ev $(B)/1mgm.sf2 $(WIN)/
+	cp "$$(find $$(dirname $$(dirname $$(realpath $$(which $(WCC))))) -name libwinpthread-1.dll | grep x86_64 | head -1)" $(WIN)/
+	rm -rf $(WIN)/ui && cp -R ui $(WIN)/ui
 	rm -rf $(WIN)/game && mkdir -p $(WIN)/game
 	cd $(GAME) && find . -type f ! -name client.bin474328 ! -path './META-INF/*' -exec sh -c 'mkdir -p "$$0/$$(dirname "$$1")" && cp "$$1" "$$0/$$1"' "$(abspath $(WIN))/game" {} \;
 
 $(WIN)/chronos.exe: $(WIN)/obj/tr.o $(WOBJ) $(WIN)/obj/manifest.o
-	$(WCC) $^ -L$(WSDL)/lib -lSDL3 -lm -static-libgcc -mwindows -o $@
+	x86_64-w64-mingw32-g++ $^ -L$(WSDL)/lib -L$(WRML)/lib $(RMLLIBS) -lSDL3 -lm -static-libgcc -static-libstdc++ -mwindows -o $@
+
+$(WRML)/lib/librmlui.a:
+	./deps.sh win
+
+$(WIN)/obj/%.o: host/%.cpp $(UIDEPS) $(WRML)/lib/librmlui.a
+	mkdir -p $(WIN)/obj
+	x86_64-w64-mingw32-g++ -O2 -std=c++17 -DRMLUI_STATIC_LIB -Ihost -I$(WSDL)/include -I$(WRML)/include -c $< -o $@
 
 $(WIN)/obj/tr.o: $(B)/tr.c host/thumbrt.h
 	mkdir -p $(WIN)/obj
@@ -67,7 +91,7 @@ $(WIN)/obj/r_%.o: restored/%.c restored/restored.h host/host.h host/thumbrt.h
 	mkdir -p $(WIN)/obj
 	$(WCC) -O2 -w -std=gnu11 -D__USE_MINGW_ANSI_STDIO=1 -Ihost -I$(WSDL)/include -c $< -o $@
 
-$(WIN)/obj/%.o: host/%.c host/host.h host/thumbrt.h
+$(WIN)/obj/%.o: host/%.c host/host.h host/thumbrt.h host/ui.h
 	mkdir -p $(WIN)/obj
 	$(WCC) -O2 -w -std=gnu11 -D__USE_MINGW_ANSI_STDIO=1 -Ihost -I$(WSDL)/include -c $< -o $@
 
@@ -76,6 +100,7 @@ $(WIN)/obj/manifest.o: windows/chronos.rc windows/chronos.manifest
 	x86_64-w64-mingw32-windres $< -o $@
 
 android: $(B)/tr.c $(GAME)/client.bin $(B)/game.ev $(B)/1mgm.sf2
+	[ -f $(call RML,android)/lib/librmlui.a ] || ./deps.sh android
 	android/build.sh
 
 # 사운드폰트 1MGM(고지는 third_party/1mgm.txt)

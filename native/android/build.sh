@@ -22,20 +22,27 @@ CC=$NDK/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android$API-cla
 INC=(-Ihost -I$SRC/include)
 cd $N
 OBJS=()
+mkdir -p $O/obj
 for f in host/*.c restored/*.c; do
-  o=$O/obj/${${f//\//_}%.c}.o; OBJS+=$o; mkdir -p $O/obj
-  [[ $o -nt $f && $o -nt host/host.h ]] || $CC -O2 -w -fPIC -std=gnu11 $INC -c $f -o $o &
+  o=$O/obj/${${f//\//_}%.c}.o; OBJS+=$o
+  [[ $o -nt $f && $o -nt host/host.h && $o -nt host/ui.h ]] || $CC -O2 -w -fPIC -std=gnu11 $INC -c $f -o $o &
+done
+RML=$B/deps/android/install
+for f in host/*.cpp; do
+  o=$O/obj/${${f//\//_}%.cpp}.o; OBJS+=$o
+  [[ $o -nt $f && $o -nt host/ui.h && $o -nt host/ui_render.h ]] || $CC++ -O2 -w -fPIC -std=c++17 -DRMLUI_STATIC_LIB $INC -I$RML/include -c $f -o $o &
 done
 tr=$O/obj/tr.o; OBJS+=$tr
 [[ $tr -nt $B/tr.c ]] || $CC -O1 -w -fPIC -std=gnu11 -Ihost -c $B/tr.c -o $tr &
 wait
-$CC -shared -Wl,-z,max-page-size=16384 $OBJS -L$O/lib/lib/$ABI -lSDL3 -lm -landroid -llog -o $O/lib/lib/$ABI/libmain.so
+$CC++ -shared -static-libstdc++ -Wl,-z,max-page-size=16384 $OBJS -L$O/lib/lib/$ABI -L$RML/lib -lrmlui -lfreetype -lSDL3 -lm -landroid -llog -o $O/lib/lib/$ABI/libmain.so
 
 # 자바와 패키징
-python3 $HERE/mkpak.py $B $O/assets/game.pak
+python3 $HERE/mkpak.py $B $O/assets/game.pak $N/ui
 $JDK/javac -nowarn -source 8 -target 8 -cp $JAR -d $O/java $SRC/android-project/app/src/main/java/org/libsdl/app/*.java 2>/dev/null
 $BT/d8 --release --lib $JAR --min-api $API --output $O $O/java/org/libsdl/app/*.class
 $BT/aapt2 link -o $O/base.apk -I $JAR --manifest $HERE/AndroidManifest.xml -A $O/assets
+python3 $HERE/patch_manifest.py $O/base.apk $BT/aapt2
 cd $O
 zip -q -j base.apk classes.dex
 (cd lib && zip -q -r ../base.apk lib)

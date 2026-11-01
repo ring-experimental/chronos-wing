@@ -8,7 +8,7 @@
 
 #define RATE 44100
 typedef struct { uint32_t time; uint8_t kind, ch; uint32_t rate, len; const uint8_t *data; } ev_t;
-typedef struct { uint64_t hash; uint32_t n; ev_t *ev; uint32_t duration; } seq_t;
+typedef struct { uint64_t hash; uint32_t n; ev_t *ev; uint32_t duration; bool has_wave; } seq_t;
 typedef struct { bool on, repeat; seq_t *s; uint32_t next; uint64_t pos; uint32_t handle; } play_t;
 typedef struct { bool on; const int16_t *s; uint32_t n; double pos, step; uint32_t handle; } wave_t;
 
@@ -49,7 +49,7 @@ static void load_events(const char *path) {
             e->kind = *p++;
             if (e->time > s->duration) s->duration = e->time;
             if (e->kind == 0) { e->len = rd32(p); p += 4; e->data = p; p += e->len; }
-            else { e->ch = *p++; e->rate = rd32(p); p += 4; e->len = rd32(p); p += 4; e->data = p; p += (size_t)e->len * 2; }
+            else { s->has_wave = true; e->ch = *p++; e->rate = rd32(p); p += 4; e->len = rd32(p); p += 4; e->data = p; p += (size_t)e->len * 2; }
         }
     }
 }
@@ -81,7 +81,7 @@ static void run_events(play_t *p) {
     uint64_t now_ms = p->pos * 1000 / RATE;
     while (p->next < p->s->n && p->s->ev[p->next].time <= now_ms) {
         ev_t *e = &p->s->ev[p->next++];
-        if (e->kind == 0) { if (synth) midi(e->data, e->len); }
+        if (e->kind == 0) { if (synth && !p->s->has_wave) midi(e->data, e->len); }
         else {
             for (int w = 0; w < 16; w++)
                 if (!waves[w].on) {
@@ -91,10 +91,36 @@ static void run_events(play_t *p) {
         }
     }
     if (p->next >= p->s->n && p->pos * 1000 / RATE >= p->s->duration) {
-        synth_reset();
+        if (!p->s->has_wave) synth_reset();
         if (p->repeat && p->s->duration) { p->pos = 0; p->next = 0; }
         else p->on = false;
     }
+}
+
+// 원본은 소리를 하나만 내는 기기용이라 효과음마다 "배경음 정지, 효과음 재생, 효과음 정지, 배경음 처음부터 재생"을 호출한다.
+// 함께 들리도록 이 순서를 해석한다. 효과음이 끼어든 정지는 무시하고, 같은 곡 재생은 이어서 튼다.
+// 효과음이 끝난 뒤에도 재생 요청이 없으면 그때 실제로 멈춘다.
+#define MUSIC_STOP_WAIT_MS 100
+#define MUSIC_INTERRUPT_MAX_MS 6000
+static uint64_t music_stop_at, music_interrupt_at;
+static uint32_t interrupting_sfx;
+
+static play_t *music_play(void) {
+    for (int i = 0; i < 16; i++) if (plays[i].on && !plays[i].s->has_wave) return &plays[i];
+    return NULL;
+}
+
+static void music_clear_stop(void) { music_stop_at = music_interrupt_at = 0; interrupting_sfx = 0; }
+
+static void music_stop_now(void) {
+    play_t *m = music_play();
+    if (m) { m->on = false; synth_reset(); }
+    music_clear_stop();
+}
+
+static void music_check_stop(void) {
+    uint64_t now = SDL_GetTicks();
+    if ((music_stop_at && now >= music_stop_at) || (music_interrupt_at && now - music_interrupt_at >= MUSIC_INTERRUPT_MAX_MS)) music_stop_now();
 }
 
 static void SDLCALL audio_cb(void *ud, SDL_AudioStream *st, int additional, int total) {
@@ -104,6 +130,7 @@ static void SDLCALL audio_cb(void *ud, SDL_AudioStream *st, int additional, int 
     while (frames > 0) {
         int n = frames > 256 ? 256 : frames; // 이벤트 시각 해상도 약 6ms
         SDL_LockMutex(lock);
+        music_check_stop();
         memset(buf, 0, sizeof(float) * 2 * n);
         for (int i = 0; i < 16; i++) if (plays[i].on) { run_events(&plays[i]); plays[i].pos += n; }
         if (synth) tsf_render_float(synth, buf, n, 0);
@@ -129,6 +156,11 @@ static void SDLCALL audio_cb(void *ud, SDL_AudioStream *st, int additional, int 
         SDL_PutAudioStreamData(st, buf, n * 2 * (int)sizeof(float));
         frames -= n;
     }
+}
+
+void audio_pause(bool paused) {
+    if (!stream) return;
+    if (paused) SDL_PauseAudioStreamDevice(stream); else SDL_ResumeAudioStreamDevice(stream);
 }
 
 void audio_init(const char *soundfont) {
@@ -166,20 +198,39 @@ uint32_t audio_load(const uint8_t *data, uint32_t size) {
 void audio_stop(uint32_t handle) {
     if (!handle || !lock) return;
     SDL_LockMutex(lock);
-    for (int i = 0; i < 16; i++) if (plays[i].on && plays[i].handle == handle) {
-        plays[i].on = false;
-        synth_reset();
+    play_t *m = music_play();
+    if (m && m->handle == handle) {
+        if (!music_interrupt_at && !music_stop_at) music_stop_at = SDL_GetTicks() + MUSIC_STOP_WAIT_MS;
+    } else if (handle == interrupting_sfx) {
+        // 효과음은 끝까지 울린다. 이 뒤로 배경음 요청이 곧 오지 않으면 실제 정지다.
+        music_stop_at = SDL_GetTicks() + MUSIC_STOP_WAIT_MS;
     }
-    for (int w = 0; w < 16; w++) if (waves[w].on && waves[w].handle == handle) waves[w].on = false;
     SDL_UnlockMutex(lock);
 }
 
 void audio_play(uint32_t handle, bool repeat) {
     if (!handle || handle > nhandles) return;
-    audio_stop(handle);
+    seq_t *seq = handles[handle - 1];
     SDL_LockMutex(lock);
+    play_t *m = music_play();
+    if (seq->has_wave) {
+        if (m && (music_stop_at || music_interrupt_at)) {
+            music_stop_at = 0;
+            if (!music_interrupt_at) music_interrupt_at = SDL_GetTicks();
+            interrupting_sfx = handle;
+        }
+    } else if (m && m->s == seq) {
+        // 같은 곡이면 처음으로 돌리지 않고 핸들만 넘긴다.
+        m->handle = handle;
+        m->repeat = repeat;
+        music_clear_stop();
+        SDL_UnlockMutex(lock);
+        return;
+    } else {
+        music_stop_now();
+    }
     for (int i = 0; i < 16; i++) if (!plays[i].on) {
-        plays[i] = (play_t){true, repeat, handles[handle - 1], 0, 0, handle};
+        plays[i] = (play_t){true, repeat, seq, 0, 0, handle};
         break;
     }
     SDL_UnlockMutex(lock);

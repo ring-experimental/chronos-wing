@@ -18,7 +18,11 @@ make windows   # build/win 폴더 통째로 옮겨 chronos.exe 실행. 실행 �
 make android   # build/android/chronos.apk(arm64, 디버그 키). adb install로 설치
 ```
 
-Android는 첫 실행 때 APK 안의 데이터를 풀고, 화면 터치 패드를 쓴다(데스크톱에서는 `--touch`). `123` 버튼이 숫자 패드를 켜고 끈다. 뒤로 키는 CLEAR다.
+Android는 첫 실행 때 APK 안의 데이터를 푼다. 뒤로 키는 CLEAR다.
+
+## UI
+
+게임 위에 얹는 UI는 RmlUi(`host/ui.cpp`, 문서 `ui/`)다. 터치 패드는 Android 기본, 데스크톱은 `--touch` 또는 설정에서 켠다. F1이나 패드의 `설정`으로 크기, 투명도, 위치를 바꾸며 `ui.ini`에 저장된다. 표시 조건은 데이터 모델 `ui`의 `dialog`, `edit`, `pad_on`에 묶여 있고 대사 중에는 OK만 남는다. 의존성은 처음 빌드 때 `deps.sh`가 만든다.
 
 - `build/`는 원본 파생물이라 저장소에 넣지 않는다. 원본과 빌드 묶음을 공개하지 않는다.
 - `run_test.sh`, `stress.sh`: 제어 파일로 키를 넣는 자동 시험. 저장 폴더를 따로 쓴다.
@@ -29,5 +33,6 @@ Android는 첫 실행 때 APK 안의 데이터를 풀고, 화면 터치 패드�
 - WIPI API 동작: [WIE](https://github.com/dlunch/wie) (MIT). 소스를 참고해 C로 옮겼고 링크하지 않는다.
 - SMAF 변환(빌드 때만): smaf-player (MIT).
 - 플랫폼 계층: SDL3 (zlib).
+- UI: RmlUi (MIT), FreeType (FTL), Pretendard (OFL, `third_party/Pretendard-LICENSE.txt`).
 - MIDI 합성: TinySoundFont (MIT), `third_party/tsf.h`.
 - 사운드폰트: 1MGM (CC BY 3.0), `third_party/1mgm.txt`.

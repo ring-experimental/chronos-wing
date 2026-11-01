@@ -44,6 +44,7 @@ uint64_t now_ms(void);
 // 표시
 void video_present(uint32_t fb_handle);
 void host_key(int type, int code);
+void audio_pause(bool paused);
 extern int screen_w, screen_h;
 void request_exit(void);
 

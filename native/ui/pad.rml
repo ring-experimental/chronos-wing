@@ -1,0 +1,33 @@
+<rml>
+<head><link type="text/rcss" href="ui.rcss"/><title>pad</title></head>
+<body data-model="ui">
+<div id="root" data-if="pad_on || edit" data-style-opacity="edit ? 0.9 : alpha / 100">
+  <!-- g[번호]는 host/ui.cpp의 groups 순서다. 대사 중에는 OK와 스킵만 남는다. 키는 게임 도움말의 기본 조작을 따른다. -->
+  <div id="dpad" class="group" style="width:3em;height:3em;" data-if="edit || !dialog" data-style-left="g[0].left" data-style-top="g[0].top" data-style-font-size="g[0].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 0">
+    <div class="dial"></div>
+    <div class="btn arrow up" code="-1" style="left:1em;top:0.05em;"></div>
+    <div class="btn arrow down" code="-2" style="left:1em;top:1.95em;"></div>
+    <div class="btn arrow left" code="-3" style="left:0.05em;top:1em;"></div>
+    <div class="btn arrow right" code="-4" style="left:1.95em;top:1em;"></div>
+  </div>
+  <div id="ok" class="group" style="width:1.6em;height:1.6em;" data-style-left="g[1].left" data-style-top="g[1].top" data-style-font-size="g[1].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 1">
+    <div class="btn orb" code="-5"><span class="n">OK</span></div>
+  </div>
+  <div id="skill" class="group" style="width:1.55em;height:2.75em;" data-if="edit || !dialog" data-style-left="g[2].left" data-style-top="g[2].top" data-style-font-size="g[2].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 2">
+    <div class="btn skill" code="55" style="left:0;top:1.75em;"><span class="n">7</span></div>
+    <div class="btn skill" code="57" style="left:0.55em;top:0;"><span class="n">9</span></div>
+  </div>
+  <div id="aux" class="group" style="width:2.7em;height:0.8em;" data-if="edit || !dialog" data-style-left="g[3].left" data-style-top="g[3].top" data-style-font-size="g[3].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 3">
+    <div class="btn small" code="42" style="left:0em;"><div class="icon i-bag"></div></div>
+    <div class="btn small" code="35" style="left:0.95em;"><div class="icon i-map"></div></div>
+    <div class="btn small" code="-16" style="left:1.9em;"><div class="icon i-menu"></div></div>
+  </div>
+  <div id="sys" class="group" style="width:0.8em;height:0.8em;" data-if="edit || !dialog" data-style-left="g[4].left" data-style-top="g[4].top" data-style-font-size="g[4].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 4">
+    <div class="btn small" action="settings" style="left:0em;"><div class="icon i-gear"></div></div>
+  </div>
+  <div id="skip" class="group" style="width:1.6em;height:0.8em;" data-if="edit || dialog" data-style-left="g[5].left" data-style-top="g[5].top" data-style-font-size="g[5].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 5">
+    <div class="btn pill" code="35"><span class="t">SKIP ▶</span></div>
+  </div>
+</div>
+</body>
+</rml>

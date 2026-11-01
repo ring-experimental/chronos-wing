@@ -1,6 +1,7 @@
 // 크로노스 윙 네이티브 진입점. SDL3 창, 입력, 시험용 제어 파일.
 // 사용법: chronos [게임 데이터 폴더] [--windowed] [--touch] [--width <폭>] [--save <폴더>] [--ctrl <파일>] [--soundfont <sf2>]
 #include "host.h"
+#include "ui.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <stdio.h>
@@ -20,6 +21,9 @@ extern float audio_peak;
 static int width_arg;
 
 void request_exit(void) { running = false; }
+
+// 대사가 진행되는 동안 1인 게임 내부 값이다. 컷신과 필드 대사 모두 해당한다(장면별 메모리 비교로 찾음).
+bool game_in_dialog(void) { return cpu.m && cpu.m[0x1a2940]; }
 
 // 높이 320을 유지하고 폭은 모니터 비율을 따른다(240~640). 창 모드 기본값은 원작 폭이다.
 static int choose_width(bool windowed) {
@@ -65,11 +69,32 @@ static void frame_log(const uint8_t *px, int w, int h, int bpl) {
     fclose(o);
 }
 
-void touch_draw(SDL_Renderer *ren, int w, int h);
-void touch_event(SDL_Renderer *ren, SDL_Event *e);
-void touch_release_all(void);
-extern bool touch_enabled;
 bool android_prepare_data(void);
+static bool frame_dirty;
+static const char *winshot_path;
+
+// 게임 화면을 비율대로 맞추고 그 위에 UI를 그린다.
+static void render_frame(void) {
+    int ow, oh;
+    SDL_GetCurrentRenderOutputSize(ren, &ow, &oh);
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    SDL_RenderClear(ren);
+    if (tex) {
+        float tw, th;
+        SDL_GetTextureSize(tex, &tw, &th);
+        float scale = SDL_min(ow / tw, oh / th);
+        SDL_FRect dst = {(ow - tw * scale) / 2, (oh - th * scale) / 2, tw * scale, th * scale};
+        SDL_RenderTexture(ren, tex, NULL, &dst);
+    }
+    ui_render();
+    if (winshot_path) {
+        SDL_Surface *s = SDL_RenderReadPixels(ren, NULL);
+        if (s) { SDL_SaveBMP(s, winshot_path); SDL_DestroySurface(s); }
+        winshot_path = NULL;
+    }
+    SDL_RenderPresent(ren);
+    frame_dirty = false;
+}
 
 void video_present(uint32_t fb) {
     cpu_t *c = &cpu;
@@ -81,13 +106,9 @@ void video_present(uint32_t fb) {
     if (!tex) {
         tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STREAMING, w, h);
         SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
-        SDL_SetRenderLogicalPresentation(ren, w, h, SDL_LOGICAL_PRESENTATION_LETTERBOX);
     }
     SDL_UpdateTexture(tex, NULL, px, bpl);
-    SDL_RenderClear(ren);
-    SDL_RenderTexture(ren, tex, NULL, NULL);
-    touch_draw(ren, w, h);
-    SDL_RenderPresent(ren);
+    frame_dirty = true;
 }
 
 static void write_shot(const char *path) {
@@ -157,6 +178,18 @@ static int key_from_name(const char *n) {
 static int pending_release, release_code;
 static uint64_t release_at;
 
+// 대조용. 게스트 데이터 영역을 CHRONOS_FRAMELOG 폴더의 mem_<이름>.bin에 쓴다.
+static void dump_memory(const char *name) {
+    const char *dir = getenv("CHRONOS_FRAMELOG");
+    if (!dir) return;
+    char path[1100];
+    snprintf(path, sizeof path, "%s/mem_%s.bin", dir, name);
+    FILE *o = fopen(path, "wb");
+    if (!o) return;
+    fwrite(cpu.m + 0x19c8d4, 1, 0x400000 - 0x19c8d4, o);
+    fclose(o);
+}
+
 // CHRONOS_SCRIPT=<파일>: `<프레임> key|up|quit [이름]` 줄을 그만큼 표시한 뒤 실행한다.
 static void script_poll(void) {
     static FILE *f;
@@ -178,7 +211,32 @@ static void script_poll(void) {
         if (!strcmp(cmd, "key") && k) send_key(2, k);
         else if (!strcmp(cmd, "up") && k) send_key(3, k);
         else if (!strcmp(cmd, "quit")) running = false;
+        else if (!strcmp(cmd, "dump")) dump_memory(name);
     }
+}
+
+// 시험용. `finger down|move|up <id> <x> <y>`, `mouse down|move|up <x> <y>`. 좌표는 0~1 비율이다.
+static void inject_pointer(const char *line) {
+    char what[8], act[8];
+    int id = 0;
+    float x = 0, y = 0;
+    int ww, wh;
+    SDL_GetWindowSize(win, &ww, &wh);
+    SDL_Event e;
+    SDL_zero(e);
+    if (sscanf(line, "%7s %7s", what, act) != 2) return;
+    if (!strcmp(what, "finger")) {
+        if (sscanf(line, "%*s %*s %d %f %f", &id, &x, &y) != 3) return;
+        e.type = !strcmp(act, "down") ? SDL_EVENT_FINGER_DOWN : !strcmp(act, "up") ? SDL_EVENT_FINGER_UP : SDL_EVENT_FINGER_MOTION;
+        e.tfinger.fingerID = id + 1;
+        e.tfinger.x = x;
+        e.tfinger.y = y;
+    } else {
+        if (sscanf(line, "%*s %*s %f %f", &x, &y) != 2) return;
+        if (!strcmp(act, "move")) { e.type = SDL_EVENT_MOUSE_MOTION; e.motion.x = x * ww; e.motion.y = y * wh; }
+        else { e.type = !strcmp(act, "down") ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP; e.button.button = SDL_BUTTON_LEFT; e.button.x = x * ww; e.button.y = y * wh; }
+    }
+    SDL_PushEvent(&e);
 }
 
 static void ctrl_poll(void) {
@@ -201,6 +259,9 @@ static void ctrl_poll(void) {
             int k = key_from_name(lines[i] + 4);
             if (k) { send_key(2, k); release_code = k; release_at = now_ms() + 150; }
         } else if (!strncmp(lines[i], "shot ", 5)) write_shot(lines[i] + 5);
+        else if (!strncmp(lines[i], "winshot ", 8)) { static char p[1100]; snprintf(p, sizeof p, "%s", lines[i] + 8); winshot_path = p; frame_dirty = true; }
+        else if (!strcmp(lines[i], "settings")) ui_toggle_settings();
+        else if (!strncmp(lines[i], "finger ", 7) || !strncmp(lines[i], "mouse ", 6)) inject_pointer(lines[i]);
         else if (!strcmp(lines[i], "quit")) running = false;
     }
     (void)pending_release;
@@ -211,7 +272,7 @@ static void load_image(void) {
     char path[1100];
     snprintf(path, sizeof path, "%s/client.bin", game_dir);
     FILE *f = fopen(path, "rb");
-    if (!f) { fprintf(stderr, "%s 없음\n", path); exit(1); }
+    if (!f) { SDL_Log("%s 없음", path); exit(1); }
     size_t n = fread(c->m + IMAGE_LOAD, 1, 0x100000, f);
     fclose(f);
     // 원본 시작 코드(0xc)가 하는 재배치와 같다. BSS는 calloc으로 이미 0이다.
@@ -226,11 +287,11 @@ static void load_image(void) {
 }
 
 int main(int argc, char **argv) {
-    bool windowed = false;
+    bool windowed = false, force_pad = false;
     const char *soundfont = NULL, *save = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--windowed")) windowed = true;
-        else if (!strcmp(argv[i], "--touch")) touch_enabled = true;
+        else if (!strcmp(argv[i], "--touch")) force_pad = true;
         else if (!strcmp(argv[i], "--save") && i + 1 < argc) save = argv[++i];
         else if (!strcmp(argv[i], "--width") && i + 1 < argc) width_arg = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--ctrl") && i + 1 < argc) ctrl_path = argv[++i];
@@ -240,15 +301,14 @@ int main(int argc, char **argv) {
     extern FILE *api_trace;
     if (getenv("CHRONOS_TRACE")) api_trace = fopen(getenv("CHRONOS_TRACE"), "w");
 #ifdef __ANDROID__
-    touch_enabled = true;
     windowed = false;
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 #endif
-    if (touch_enabled) SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "1");
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) { fprintf(stderr, "SDL_Init: %s\n", SDL_GetError()); return 1; }
+    SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "1");
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) { SDL_Log("SDL_Init: %s", SDL_GetError()); return 1; }
 #ifdef __ANDROID__
-    if (!android_prepare_data()) { SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "크로노스 윙", "게임 데이터를 풀지 못했습니다.", NULL); return 1; }
+    if (!android_prepare_data()) { SDL_Log("게임 데이터 풀기 실패: %s", SDL_GetError()); SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "크로노스 윙", "게임 데이터를 풀지 못했습니다.", NULL); return 1; }
 #endif
     // 인자가 없으면 실행 파일 옆의 game 폴더를 쓴다.
     if (!game_dir[0]) snprintf(game_dir, sizeof game_dir, "%sgame", SDL_GetBasePath());
@@ -260,10 +320,14 @@ int main(int argc, char **argv) {
     SDL_CreateDirectory(save_dir);
 
     if (!SDL_CreateWindowAndRenderer("크로노스 윙", screen_w * 2, 640, windowed ? SDL_WINDOW_RESIZABLE : SDL_WINDOW_FULLSCREEN, &win, &ren)) {
-        fprintf(stderr, "창 생성 실패: %s\n", SDL_GetError());
+        SDL_Log("창 생성 실패: %s", SDL_GetError());
         return 1;
     }
     SDL_SetRenderVSync(ren, 1);
+    char ui_dir[1100], ui_cfg[1100];
+    snprintf(ui_dir, sizeof ui_dir, "%s/../ui", game_dir);
+    snprintf(ui_cfg, sizeof ui_cfg, "%s/../ui.ini", save_dir);
+    if (!ui_init(win, ren, ui_dir, ui_cfg, force_pad)) SDL_Log("UI를 열지 못함: 패드와 설정 없이 진행");
 
     cpu.m = calloc(1, GUEST_MEM);
     cpu.memsz = GUEST_MEM;
@@ -276,15 +340,16 @@ int main(int argc, char **argv) {
     uint32_t start[2] = {0, 0};
     guest_call(FN_START, start, 2);
 
+    bool paused = false;
     while (running) {
         SDL_Event e;
         int64_t wait = timers_next_ms();
         if (wait > 10 || wait < 0) wait = 10;
         if (SDL_WaitEventTimeout(&e, (int)wait)) {
             do {
-                touch_event(ren, &e);
-                if (e.type == SDL_EVENT_QUIT) running = false;
-                else if (e.type == SDL_EVENT_WILL_ENTER_BACKGROUND) touch_release_all();
+                if (e.type == SDL_EVENT_QUIT) { SDL_Log("종료 이벤트"); running = false; }
+                else if (e.type == SDL_EVENT_WILL_ENTER_BACKGROUND) ui_release_all();
+                if (ui_event(&e)) continue;
                 else if ((e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) && !e.key.repeat) {
                     if (e.key.scancode == SDL_SCANCODE_F11 && e.type == SDL_EVENT_KEY_DOWN) {
                         windowed = !windowed;
@@ -297,8 +362,13 @@ int main(int argc, char **argv) {
             } while (SDL_PollEvent(&e));
         }
         ctrl_poll();
-        timers_run();
+        // 설정 중에는 게임을 멈춘다.
+        bool modal = ui_modal();
+        if (modal != paused) { paused = modal; audio_pause(paused); }
+        if (!paused) timers_run();
+        if (frame_dirty || paused) render_frame();
     }
+    SDL_Log("메인 루프 끝, 프레임 %llu", (unsigned long long)frames);
     fprintf(stderr, "종료, 프레임 %llu, 소리 최대값 %.3f\n", (unsigned long long)frames, audio_peak);
     SDL_Quit();
     return 0;
