@@ -44,6 +44,7 @@ span { display: inline-block; }
 /* 가변폭 글자는 오른쪽에 1픽셀 여백이 있어 한 글자 버튼은 그만큼 민다. */
 .skill .n { font-size: 0.647em; line-height: 1.546em; padding-left: 2dp; box-sizing: border-box; }
 .pill .t { font-size: 0.647em; line-height: 1.236em; }
+.small .n { font-size: 0.5em; line-height: 1.6em; padding-left: 2dp; box-sizing: border-box; }
 
 /* 설정 화면과 편집 막대는 글자 크기(em)와 비율로 잡아 화면과 글자에 맞춰 늘어난다. */
 .modal { background-color: #000000aa; z-index: 10; display: flex; justify-content: center; align-items: center; }

@@ -99,10 +99,11 @@ static void run_events(play_t *p) {
 
 // 원본은 소리를 하나만 내는 기기용이라 효과음마다 "배경음 정지, 효과음 재생, 효과음 정지, 배경음 처음부터 재생"을 호출한다.
 // 함께 들리도록 이 순서를 해석한다. 효과음이 끼어든 정지는 무시하고, 같은 곡 재생은 이어서 튼다.
-// 효과음이 끝난 뒤에도 재생 요청이 없으면 그때 실제로 멈춘다.
+// 전투처럼 효과음이 이어지면 배경음 재생 요청이 수십 초 뒤에 오기도 한다. 효과음 호출 간격은 최대 1.5초였으므로
+// 그보다 넉넉히 조용할 때만 실제 정지로 본다.
 #define MUSIC_STOP_WAIT_MS 100
-#define MUSIC_INTERRUPT_MAX_MS 6000
-static uint64_t music_stop_at, music_interrupt_at;
+#define MUSIC_SFX_QUIET_MS 3000
+static uint64_t music_stop_at;
 static uint32_t interrupting_sfx;
 
 static play_t *music_play(void) {
@@ -110,7 +111,7 @@ static play_t *music_play(void) {
     return NULL;
 }
 
-static void music_clear_stop(void) { music_stop_at = music_interrupt_at = 0; interrupting_sfx = 0; }
+static void music_clear_stop(void) { music_stop_at = 0; interrupting_sfx = 0; }
 
 static void music_stop_now(void) {
     play_t *m = music_play();
@@ -119,8 +120,7 @@ static void music_stop_now(void) {
 }
 
 static void music_check_stop(void) {
-    uint64_t now = SDL_GetTicks();
-    if ((music_stop_at && now >= music_stop_at) || (music_interrupt_at && now - music_interrupt_at >= MUSIC_INTERRUPT_MAX_MS)) music_stop_now();
+    if (music_stop_at && SDL_GetTicks() >= music_stop_at) music_stop_now();
 }
 
 static void SDLCALL audio_cb(void *ud, SDL_AudioStream *st, int additional, int total) {
@@ -198,12 +198,17 @@ uint32_t audio_load(const uint8_t *data, uint32_t size) {
 void audio_stop(uint32_t handle) {
     if (!handle || !lock) return;
     SDL_LockMutex(lock);
+    // 반복 효과음은 정지 호출 말고는 끝날 방법이 없으므로 바로 끈다.
+    for (int i = 0; i < 16; i++) if (plays[i].on && plays[i].repeat && plays[i].s->has_wave && plays[i].handle == handle) {
+        plays[i].on = false;
+        for (int w = 0; w < 16; w++) if (waves[w].on && waves[w].handle == handle) waves[w].on = false;
+    }
     play_t *m = music_play();
     if (m && m->handle == handle) {
-        if (!music_interrupt_at && !music_stop_at) music_stop_at = SDL_GetTicks() + MUSIC_STOP_WAIT_MS;
+        if (!music_stop_at) music_stop_at = SDL_GetTicks() + MUSIC_STOP_WAIT_MS;
     } else if (handle == interrupting_sfx) {
-        // 효과음은 끝까지 울린다. 이 뒤로 배경음 요청이 곧 오지 않으면 실제 정지다.
-        music_stop_at = SDL_GetTicks() + MUSIC_STOP_WAIT_MS;
+        // 효과음은 끝까지 울린다. 이 뒤로 소리 요청이 한동안 없으면 실제 정지다.
+        music_stop_at = SDL_GetTicks() + MUSIC_SFX_QUIET_MS;
     }
     SDL_UnlockMutex(lock);
 }
@@ -214,9 +219,8 @@ void audio_play(uint32_t handle, bool repeat) {
     SDL_LockMutex(lock);
     play_t *m = music_play();
     if (seq->has_wave) {
-        if (m && (music_stop_at || music_interrupt_at)) {
-            music_stop_at = 0;
-            if (!music_interrupt_at) music_interrupt_at = SDL_GetTicks();
+        if (m && music_stop_at) {
+            music_stop_at = SDL_GetTicks() + MUSIC_SFX_QUIET_MS;
             interrupting_sfx = handle;
         }
     } else if (m && m->s == seq) {

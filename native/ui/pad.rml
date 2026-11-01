@@ -17,8 +17,13 @@
     <div class="btn skill" code="55" style="left:0;top:1.75em;"><span class="n">7</span></div>
     <div class="btn skill" code="57" style="left:0.55em;top:0;"><span class="n">9</span></div>
   </div>
-  <div id="aux" class="group" style="width:0.8em;height:0.8em;" data-if="edit || !dialog" data-style-left="g[3].left" data-style-top="g[3].top" data-style-font-size="g[3].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 3">
-    <div class="btn small" code="35" style="left:0em;"><div class="icon i-map"></div></div>
+  <div id="aux" class="group" style="width:5.2em;height:0.8em;" data-if="edit || !dialog" data-style-left="g[3].left" data-style-top="g[3].top" data-style-font-size="g[3].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 3">
+    <div class="btn small" code="49" style="left:0em;"><span class="n">1</span></div>
+    <div class="btn small" code="51" style="left:0.85em;"><span class="n">3</span></div>
+    <div class="btn small" code="48" style="left:1.7em;"><span class="n">0</span></div>
+    <div class="btn small" code="-6" style="left:2.55em;"><span class="n">L</span></div>
+    <div class="btn small" code="-7" style="left:3.4em;"><span class="n">R</span></div>
+    <div class="btn small" code="35" style="left:4.25em;"><div class="icon i-map"></div></div>
   </div>
   <div id="sys" class="group" style="width:0.8em;height:0.8em;" data-if="edit || !dialog" data-style-left="g[4].left" data-style-top="g[4].top" data-style-font-size="g[4].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 4">
     <div class="btn small" action="settings" style="left:0em;"><div class="icon i-gear"></div></div>
