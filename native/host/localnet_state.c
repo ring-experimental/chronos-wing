@@ -72,6 +72,7 @@ void ln_fame_add(int32_t delta) {
 }
 
 void ln_write_profile(void) {
+    ln_cash_tick();
     const ln_profile *p = ln_me();
     ln_w32((uint32_t)p->user_id);
     ln_wbytes(p->nick, 10);
