@@ -106,7 +106,7 @@ bool ln_save(const char *name, const void *p, size_t n) {
 
 static bool route(ln_req *q) {
     switch (q->major) {
-    case 0: return true; // 접속 유지
+    case 0: ln_shadow_tick(); return true; // 접속 유지. 응답은 없다.
     case 10: return ln_session(q);
     case 1:
         if (q->minor <= 11) return ln_mail(q);
