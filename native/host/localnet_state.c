@@ -118,32 +118,33 @@ void ln_members_save(void) {
     if (!ln_save("members", members, (size_t)member_count * sizeof(ln_member))) fprintf(stderr, "[net] 동료 저장 실패\n");
 }
 
+void ln_write_member(const ln_member *m) {
+    size_t len = strnlen(m->name, sizeof m->name);
+    ln_w64((uint64_t)m->uid);
+    ln_w16((uint16_t)m->id);
+    ln_w8((uint8_t)m->level);
+    ln_w8((uint8_t)len);
+    ln_wbytes(m->name, len);
+    ln_w16(0); // +0x4c 쓰기만 하고 읽는 코드가 없다
+    ln_w16((uint16_t)m->floor);
+    ln_w16((uint16_t)m->room);
+    ln_w16((uint16_t)m->slot);
+    ln_w8(m->fatigue);
+    ln_w32(0); // 계약기간. 동료는 0x155210이 버리고 1로 고정한다
+    ln_w8(0);
+    ln_w32((uint32_t)m->hp);
+    ln_w8(1); // +0x5a 공격력 목록 개수
+    ln_w32((uint32_t)m->attack);
+    ln_w16((uint16_t)m->pdef);
+    ln_w16((uint16_t)m->mdef);
+    ln_w8((uint8_t)m->crit);
+    ln_w8(0); // +0x59 쓰기만 하고 읽는 코드가 없다
+}
+
 void ln_write_members(void) {
     members_load();
     ln_w16((uint16_t)member_count);
-    for (int i = 0; i < member_count; i++) {
-        const ln_member *m = &members[i];
-        size_t len = strnlen(m->name, sizeof m->name);
-        ln_w64((uint64_t)m->uid);
-        ln_w16((uint16_t)m->id);
-        ln_w8((uint8_t)m->level);
-        ln_w8((uint8_t)len);
-        ln_wbytes(m->name, len);
-        ln_w16(0); // +0x4c 쓰기만 하고 읽는 코드가 없다
-        ln_w16((uint16_t)m->floor);
-        ln_w16((uint16_t)m->room);
-        ln_w16((uint16_t)m->slot);
-        ln_w8(m->fatigue);
-        ln_w32(0); // 계약기간. 동료는 0x155210이 버리고 1로 고정한다
-        ln_w8(0);
-        ln_w32((uint32_t)m->hp);
-        ln_w8(1); // +0x5a 공격력 목록 개수
-        ln_w32((uint32_t)m->attack);
-        ln_w16((uint16_t)m->pdef);
-        ln_w16((uint16_t)m->mdef);
-        ln_w8((uint8_t)m->crit);
-        ln_w8(0); // +0x59 쓰기만 하고 읽는 코드가 없다
-    }
+    for (int i = 0; i < member_count; i++) ln_write_member(&members[i]);
 }
 
 // 동료 전투 수치는 클라이언트에서 찾지 못했다(레벨과 경험치만 세이브에 있다). 레벨로 정한 값이다.
