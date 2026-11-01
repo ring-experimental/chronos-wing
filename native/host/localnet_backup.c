@@ -5,7 +5,7 @@
 #include <string.h>
 
 enum {
-    BACKUP_SIZE = 423,     // 4.1 본문: be32, 7, be32, 6*be32, 4, be16, be32, 1, 3, 동료 10*10, 소지품 64*3, 표 39*2
+    BACKUP_SIZE = 423,     // 4.1 본문: be32, 7, be32, 6*be32, 4, be16, be32, 1, 3, 동료 10*10, 고정 표 64*3(짐가방 아님), 표 39*2
     BACKUP_SAVE_AT = 11,   // 0x143b70이 돌려준 세이브 읽은 길이. 0이면 세이브가 없다.
     PICTURE_SIZE = 7000,   // 0x134918 반환값
     CHUNK_MAX = 1000,      // 0x120f3e

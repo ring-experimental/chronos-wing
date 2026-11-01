@@ -19,3 +19,9 @@
 4ab54 devmode.c wrap
 4ad54 devmode.c wrap
 264c devmode.c wrap
+3ad90 bag.c
+3aad8 bag.c
+3aa04 bag.c
+3aa74 bag.c
+3aeb8 bag.c
+3b52c bag.c
