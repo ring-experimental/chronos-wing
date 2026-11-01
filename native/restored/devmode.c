@@ -16,6 +16,7 @@ void orig_f_2edac(cpu_t *c);
 void orig_f_2ed70(cpu_t *c);
 void orig_f_4ab54(cpu_t *c);
 void orig_f_4ad54(cpu_t *c);
+void orig_f_264c(cpu_t *c);
 
 // 게임 글꼴이 읽는 EUC-KR이다.
 #define BAE "\xb9\xe8" // 배
@@ -76,6 +77,10 @@ enum {
     DROP_SLOTS = 5,
     DROP_SLOT_SIZE = 12,
     DROP_CHANCE = 0x144,
+    MAX_DAMAGE = 1000000000,
+    RET_HIT_CRITICAL = 0x135abc,
+    RET_HIT_NUMBER = 0x135acc,
+    RET_DOT_NUMBER = 0x14ff96,
     RARE_TRAIT_UNIT = 700, // 0x14ab54가 특성 값에 곱하는 수. 판정 범위는 0~32767이다.
 };
 
@@ -349,12 +354,25 @@ void f_4ab54(cpu_t *c) {
     for (int i = 0; i < DROP_SLOTS; i++) W32(monster + DROP_CHANCE + i * DROP_SLOT_SIZE, saved[i]);
 }
 
+static int scale_damage(int damage, int mul) {
+    int64_t scaled = (int64_t)damage * mul;
+    return scaled > MAX_DAMAGE ? MAX_DAMAGE : scaled < -MAX_DAMAGE ? -MAX_DAMAGE : (int)scaled;
+}
+
 // 몬스터 HP 변화. 음수가 피해다.
 void f_4ad54(cpu_t *c) {
     int delta = (int)c->r[1], mul = rate(ROW_ATTACK);
-    if (mul > 1 && delta < 0) {
-        int64_t scaled = (int64_t)delta * mul;
-        c->r[1] = (uint32_t)(scaled < -1000000000 ? -1000000000 : scaled);
-    }
+    if (mul > 1 && delta < 0) c->r[1] = (uint32_t)scale_damage(delta, mul);
     orig_f_4ad54(c);
+}
+
+// 피해 숫자 표시. 타격(0x135a04)과 지속 피해(0x14fef0)는 HP와 따로 값을 넘기므로 복귀 주소로 골라 같은 배율을 건다.
+void f_264c(cpu_t *c) {
+    int mul = rate(ROW_ATTACK);
+    if (mul > 1) {
+        uint32_t from = c->LR & ~1u;
+        if (from == RET_HIT_CRITICAL) c->r[2] = (uint32_t)scale_damage((int)c->r[2], mul);
+        else if (from == RET_HIT_NUMBER || from == RET_DOT_NUMBER) c->r[3] = (uint32_t)scale_damage((int)c->r[3], mul);
+    }
+    orig_f_264c(c);
 }
