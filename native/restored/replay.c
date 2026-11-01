@@ -25,6 +25,10 @@ enum {
     KEY_FINAL = 35,
     QUEST_RUNNING = 1,
     QUEST_DONE = 2,
+    UNLOCK_SEEN = 1,
+    UNLOCK_ESTIMATED = 2,
+    SAVE_MAIN_BYTES = 1000,
+    SAVE_QUESTS = 304, // MAINGAMEDATA를 복호화한 내용에서 +0x7b4 표의 위치
 
     GOT_SCREEN = 0x2c,
     GOT_CURSOR = 0x1e0,
@@ -199,6 +203,81 @@ static bool replaying(void) { return state != REPLAY_OFF; }
 static bool script_running(void) { cpu_t *c = &cpu; return R8(SCRIPT_RUNNING) != 0; }
 static bool game_ready(void) { cpu_t *c = &cpu; return !R8(got(GOT_LOADING)); }
 
+// 기존 세이브 소급 해금. 이 기능 전에 본 장면은 흐름 기록이 없어 세이브의 퀘스트 값으로 해금하고 정적 분석으로 고른 시작점을 넣는다.
+// 일반 플레이에서 그 장면을 다시 보면 실제 기록으로 바뀐다.
+typedef struct { short map, main, x, y; uint8_t quest_n, flag_n; uint8_t quests[4][2], flags[4][2]; } start_t;
+static const start_t STARTS[SCENE_COUNT] = {
+    {9, 10, 8, 8, 0, 0, {{0}}, {{0}}},
+    {9, 9, 184, 136, 1, 0, {{0,2}}, {{0}}},
+    {18, 4, 232, 280, 0, 0, {{0}}, {{0}}},
+    {10, 3, 120, 136, 2, 0, {{1,2},{2,1}}, {{0}}},
+    {8, 0, 136, 136, 0, 1, {{0}}, {{5,1}}},
+    {22, 8, 296, 232, 0, 0, {{0}}, {{0}}},
+    {31, 0, 136, 136, 0, 0, {{0}}, {{0}}},
+    {38, 2, 232, 392, 0, 0, {{0}}, {{0}}},
+    {209, 0, 136, 136, 0, 0, {{0}}, {{0}}},
+    {1, 0, 136, 136, 0, 0, {{0}}, {{0}}},
+    {1, 0, 136, 136, 0, 1, {{0}}, {{22,1}}},
+    {209, 0, 136, 136, 1, 0, {{10,1}}, {{0}}},
+    {211, 0, 136, 136, 0, 1, {{0}}, {{24,1}}},
+    {21, 0, 136, 136, 1, 0, {{12,1}}, {{0}}},
+    {67, 2, 72, 168, 0, 0, {{0}}, {{0}}},
+    {82, 0, 136, 136, 0, 0, {{0}}, {{0}}},
+    {21, 0, 136, 136, 1, 0, {{14,2}}, {{0}}},
+    {214, 0, 136, 136, 0, 0, {{0}}, {{0}}},
+    {88, 0, 136, 136, 1, 1, {{17,1}}, {{63,1}}},
+    {214, 0, 136, 136, 1, 0, {{18,1}}, {{0}}},
+    {225, 0, 136, 136, 0, 0, {{0}}, {{0}}},
+    {215, 0, 136, 136, 0, 0, {{0}}, {{0}}},
+    {180, 0, 136, 136, 0, 0, {{0}}, {{0}}},
+    {216, 0, 136, 136, 0, 0, {{0}}, {{0}}},
+    {82, 0, 136, 136, 1, 0, {{23,1}}, {{0}}},
+    {57, 0, 136, 136, 0, 0, {{0}}, {{0}}},
+    {204, 0, 136, 136, 1, 0, {{25,1}}, {{0}}},
+    {103, 2, 168, 216, 1, 0, {{26,1}}, {{0}}},
+    {206, 0, 136, 136, 1, 0, {{115,2}}, {{0}}},
+    {215, 0, 136, 136, 0, 1, {{0}}, {{34,1}}},
+    {32, 13, 184, 232, 0, 1, {{0}}, {{36,1}}},
+    {38, 2, 232, 392, 1, 0, {{30,1}}, {{0}}},
+    {114, 2, 504, 200, 0, 1, {{0}}, {{39,1}}},
+    {224, 0, 136, 136, 0, 0, {{0}}, {{0}}},
+    {208, 0, 136, 136, 0, 1, {{0}}, {{40,1}}},
+    {161, 0, 136, 136, 0, 1, {{0}}, {{42,1}}},
+};
+
+static void fill_estimated(int key) {
+    const start_t *st = &STARTS[key];
+    scene_t *s = &scenes[key];
+    memset(s, 0, sizeof *s);
+    s->map = st->map;
+    s->x = st->x;
+    s->y = st->y;
+    s->unlocked = UNLOCK_ESTIMATED;
+    s->main = (uint8_t)st->main;
+    s->dir = 1;
+    s->time = 0xff;
+    s->last_warp = WARP_UNKNOWN;
+    int done = key < QUEST_LAST + 1 ? key : QUEST_LAST + 1;
+    for (int q = 0; q < done; q++) s->quests[q] = QUEST_DONE;
+    if (key > 0) s->quests[key - 1] = QUEST_RUNNING;
+    for (int i = 0; i < st->quest_n; i++) s->quests[st->quests[i][0]] = st->quests[i][1];
+    for (int i = 0; i < st->flag_n; i++) s->flags[st->flags[i][0]] = st->flags[i][1];
+}
+
+static void unlock_from_save(void) {
+    static uint8_t data[SAVE_MAIN_BYTES];
+    if (savefile_read_plain("MAINGAMEDATA", data, sizeof data) != SAVE_MAIN_BYTES) return;
+    const uint8_t *quests = data + SAVE_QUESTS;
+    bool changed = false;
+    for (int key = 0; key < SCENE_COUNT; key++) {
+        bool seen = key == KEY_FINAL ? quests[QUEST_LAST] == QUEST_DONE : quests[key] != 0;
+        if (!seen || scenes[key].unlocked) continue;
+        fill_estimated(key);
+        changed = true;
+    }
+    if (changed) save_file();
+}
+
 // 일반 플레이 기록
 
 static void begin_capture(int main) {
@@ -232,7 +311,7 @@ static void finish_capture(void) {
 
 static void mark_scene(int key) {
     load_file();
-    if (scenes[key].unlocked) return; // 처음 본 흐름을 남긴다.
+    if (scenes[key].unlocked == UNLOCK_SEEN) return; // 처음 본 흐름을 남긴다. 소급 해금한 줄은 실제 흐름으로 바꾼다.
     scenes[key] = capture;
     scenes[key].last_warp = WARP_UNKNOWN; // 끝을 모르면 재생이 스크립트 끝까지 간다.
     capture_key = key;
@@ -523,6 +602,8 @@ static void clamp_view(void) {
 }
 
 static void open_panel(void) {
+    load_file();
+    unlock_from_save();
     cpu_t *c = &cpu;
     load_file();
     selected = 0;

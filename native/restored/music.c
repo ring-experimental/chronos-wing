@@ -80,6 +80,21 @@ void f_7d3ec(cpu_t *c) {
     if (has_data && loaded_track >= 0 && !audio_solo_active()) unlock(loaded_track);
 }
 
+// 기존 세이브 소급 해금. 세이브에 재생 기록이 없어, 시작한 메인 퀘스트의 장면이 지나는 맵의 기본 곡을 들은 것으로 본다.
+enum { SAVE_MAIN_BYTES = 1000, SAVE_QUESTS = 304, QUEST_LAST = 34, QUEST_DONE = 2 };
+static const uint32_t SCENE_TRACKS[36] = {0x004000, 0x004004, 0x084005, 0x004000, 0x002000, 0x000008, 0x00a000, 0x000010, 0x002000, 0x010002, 0x002002, 0x000020, 0x002000, 0x080040, 0x040040, 0x000080, 0x082000, 0x000100, 0x000100, 0x002100, 0x000000, 0x002000, 0x000000, 0x002000, 0x002080, 0x100000, 0x002000, 0x000000, 0x000000, 0x002000, 0x008000, 0x000012, 0x002400, 0x002000, 0x001000, 0x000001};
+
+static void unlock_from_save(void) {
+    static uint8_t data[SAVE_MAIN_BYTES];
+    if (savefile_read_plain("MAINGAMEDATA", data, sizeof data) != SAVE_MAIN_BYTES) return;
+    const uint8_t *quests = data + SAVE_QUESTS;
+    for (int key = 0; key <= QUEST_LAST + 1; key++) {
+        if (!(key > QUEST_LAST ? quests[QUEST_LAST] == QUEST_DONE : quests[key] != 0)) continue;
+        for (int t = 0; t < TRACKS; t++)
+            if (SCENE_TRACKS[key] >> t & 1) unlock(t);
+    }
+}
+
 static uint32_t track_handle(int track) {
     if (handles[track]) return handles[track];
     char path[1200];
@@ -116,6 +131,8 @@ static uint32_t guest_text(const char *s, int *len) {
 }
 
 static void open_panel(void) {
+    read_unlocked();
+    unlock_from_save();
     cpu_t *c = &cpu;
     read_unlocked();
     cursor = top_row = 0;

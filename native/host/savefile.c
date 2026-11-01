@@ -109,6 +109,27 @@ static bool game_accepts(const uint8_t *d, uint32_t n) {
     return same;
 }
 
+// 저장 파일을 해시로 검증하고 복호화한 내용을 돌려준다. 앞 16바이트 해시는 뺀다. 실패하면 -1이다.
+int savefile_read_plain(const char *name, uint8_t *out, int cap) {
+    char path[1200];
+    snprintf(path, sizeof path, "%s/%s", save_dir, name);
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    uint8_t *d = malloc((size_t)cap + 16);
+    int n = d ? (int)fread(d, 1, (size_t)cap + 16, f) : 0;
+    fclose(f);
+    if (n <= 16 || !game_accepts(d, (uint32_t)n)) { free(d); return -1; }
+    int body = n - 16;
+    uint32_t buf = heap_alloc((uint32_t)body);
+    memcpy(cpu.m + buf, d + 16, (size_t)body);
+    uint32_t a[] = {buf, (uint32_t)body};
+    guest_call(FN_DECRYPT, a, 2);
+    memcpy(out, cpu.m + buf, (size_t)body);
+    heap_free(buf);
+    free(d);
+    return body;
+}
+
 static int known_file(const char *name) {
     for (int i = 0; i < NFILES; i++) if (!strcmp(FILES[i], name)) return i;
     return -1;
