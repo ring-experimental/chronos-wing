@@ -25,6 +25,12 @@ typedef void (*api_fn)(cpu_t *c);
 void api_dispatch(cpu_t *c, uint32_t table, uint32_t index);
 void api_install(void);
 void ime_api(cpu_t *c, uint32_t i); // 표 4, ime.c
+typedef union SDL_Event SDL_Event;
+bool ime_event(const SDL_Event *e);
+void ime_poll(void);
+int ime_text_width(const char *s, int n);
+void ime_text(const char *utf8);
+void ime_compose(const char *utf8);
 void uic_api(cpu_t *c, uint32_t i); // 표 9, ime.c
 
 // 메모리

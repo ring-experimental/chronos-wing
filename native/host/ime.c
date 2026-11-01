@@ -1,11 +1,15 @@
-// 입력기(표 4)와 TextComponent(표 9). 닉네임 입력(0x156ffc, 0x104eec)이 쓴다. 표시와 커서는 게임이 맡고 여기서는 키를 글자로 바꾼다.
-// 모드 1 영문, 2 숫자, 3 한글(0x104d3e 표시 문자열 "A", "1", "한").
-// 키: 영문은 2~9 멀티탭. 한글은 1 ㄱㅋㄲ 2 ㄴㄹ 3 ㄷㅌㄸ 4 ㅂㅍㅃ 5 ㅅㅎㅆ 6 ㅈㅊㅉ 7 ㅇㅁ 8 ㅏㅓㅑㅕㅐㅔㅒㅖ 9 ㅗㅜㅛㅠ 0 ㅡㅣ.
-// 같은 키를 1초 안에 다시 누르면 순환한다. 원본 폰의 배열은 확인할 수 없어 나랏글 자음 배치를 따랐다.
+// 입력기(표 4)와 TextComponent(표 9). 입력 칸(0x156ffc, 0x104eec)은 원본이 폰 키패드로 글자를 만들지만, 플랫폼 입력기(SDL 텍스트 입력)의 글자를 받아 칸에 직접 넣는다.
+// 칸은 하나다: +4 글자(EUC-KR), +0x84 커서 뒤 글자 사본, +0x104 커서, +0x106 최대 바이트, +0x108 조합 폭(0x104ae4, 0x104eec). 그리기는 게임이 한다(0x104d3e).
 #include "host.h"
+#include <SDL3/SDL.h>
 #include <string.h>
 
-enum { FLUSH_KEY = 0x9d, MODE_ALPHA = 1, MODE_DIGIT = 2, MODE_HANGUL = 3, TAP_MS = 1000, FIELD_MAX = 8 };
+enum {
+    FIELD_OPEN = 0x20d758 + 0x1cf, // 0x156ffc가 켜고 0x157078이 끈다
+    FIELD = 0x20d638, F_TEXT = 4, F_TAIL = 0x84, F_POS = 0x104, F_MAX = 0x106, F_COMPOSE_W = 0x108, TEXT_CAP = 0x80,
+    NAME_FIELD_MAX = 14, NAME_BYTES = 10, MODE_HANGUL = 3, COMPOSE_MAX = 32, FIELD_MAX = 8,
+    KEY_OK = -5, KEY_CLEAR = -16, KEY_UP = -1, KEY_DOWN = -2, KEY_LEFT = -3, KEY_RIGHT = -4,
+};
 
 // 유니코드 음절(AC00~) 순서로 KS X 1001 수록 여부. 수록 음절은 유니코드 순으로 EUC-KR B0A1부터 놓인다.
 static const uint8_t KS_SYLLABLES[] = {
@@ -55,162 +59,148 @@ static const uint8_t KS_SYLLABLES[] = {
     17,0,2,19,1,43,48,17,144,2,211,3,43,18,17,48,2,19,1,43,0,
 };
 
-static int mode = MODE_HANGUL;
-static int last_key = -1, tap;
-static uint64_t last_ms;
-static char alpha_comp; // 영문 조합 중인 글자
-
-// 자모는 호환 자모 번호(EUC-KR A4A1 + n, 유니코드 3131 + n)로 다룬다.
-#define J(u) ((u) - 0x3131)
-static const int CHO_OF[] = { // 호환 자음 -> 초성 번호, 없으면 -1
-    0, 1, -1, 2, -1, -1, 3, 4, 5, -1, -1, -1, -1, -1, -1, -1, 6, 7, 8, -1, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-};
-static const int JONG_OF[] = { // 호환 자음 -> 종성 번호. 겹받침은 만들지 않는다.
-    1, 2, -1, 4, -1, -1, 7, -1, 8, -1, -1, -1, -1, -1, -1, -1, 16, 17, -1, 19, 20, 21, 22, -1, 23, 24, 25, 26, 27, -1,
-};
-static const uint16_t CONS[10][4] = { // 키 0~9, 0은 모음
-    {0}, {0x3131, 0x314b, 0x3132}, {0x3134, 0x3139}, {0x3137, 0x314c, 0x3138}, {0x3142, 0x314d, 0x3143},
-    {0x3145, 0x314e, 0x3146}, {0x3148, 0x314a, 0x3149}, {0x3147, 0x3141},
-};
-static const uint16_t VOWEL[10][9] = {
-    [0] = {0x3161, 0x3163}, [8] = {0x314f, 0x3153, 0x3151, 0x3155, 0x3150, 0x3154, 0x3152, 0x3156}, [9] = {0x3157, 0x315c, 0x315b, 0x3160},
-};
-
-// 조합 상태. cho, jung, jong은 호환 자모(0이면 없음)다. prev_jung은 겹모음을 만들기 전 모음이다.
-static uint16_t h_cho, h_jung, h_jong;
-
-static int emit_jamo(char *o, uint16_t u) { o[0] = (char)0xa4; o[1] = (char)(0xa1 + u - 0x3131); o[2] = 0; return 2; }
-
-static int emit_syllable(char *o, int cho, int jung, int jong) {
-    int idx = (cho * 21 + jung) * 28 + jong, rank = 0;
+// 글자 하나를 EUC-KR로. 게임 글꼴에 없는 글자는 0을 돌려준다. 영문 소문자는 원본 칸처럼 대문자로 넣는다(0x104eec).
+static int to_euckr(uint32_t u, char *o) {
+    if (u >= 'a' && u <= 'z') u -= 0x20;
+    if (u >= 0x20 && u < 0x7f) { o[0] = (char)u; return 1; }
+    if (u >= 0x3131 && u <= 0x3163) { o[0] = (char)0xa4; o[1] = (char)(0xa1 + u - 0x3131); return 2; }
+    if (u < 0xac00 || u > 0xd7a3) return 0;
+    int idx = (int)u - 0xac00, rank = 0;
     if (!(KS_SYLLABLES[idx / 8] >> (idx % 8) & 1)) return 0;
     for (int i = 0; i < idx / 8; i++) rank += __builtin_popcount(KS_SYLLABLES[i]);
     rank += __builtin_popcount(KS_SYLLABLES[idx / 8] & ((1 << (idx % 8)) - 1));
     o[0] = (char)(0xb0 + rank / 94);
     o[1] = (char)(0xa1 + rank % 94);
-    o[2] = 0;
     return 2;
 }
 
-// 조합 중인 글자를 EUC-KR로. 없으면 0.
-static int hangul_compose(char *o) {
-    o[0] = 0;
-    if (h_cho && h_jung) {
-        int n = emit_syllable(o, CHO_OF[J(h_cho)], h_jung - 0x314f, h_jong ? JONG_OF[J(h_jong)] : 0);
-        if (n) return n;
+static char *field_text(void) { return (char *)cpu.m + FIELD + F_TEXT; }
+
+// 게임 글꼴의 대략 폭. 커서 위치에만 쓴다.
+int ime_text_width(const char *s, int n) {
+    int w = 0;
+    for (int i = 0; i < n && s[i]; i++) {
+        if ((uint8_t)s[i] & 0x80) { w += 11; i++; }
+        else w += s[i] == ' ' ? 4 : 6;
     }
-    if (h_cho) return emit_jamo(o, h_cho);
-    if (h_jung) return emit_jamo(o, h_jung);
-    return 0;
+    return w;
 }
 
-static uint16_t compound(uint16_t a, uint16_t b) {
-    static const uint16_t T[][3] = {{0x3157, 0x314f, 0x3158}, {0x3157, 0x3150, 0x3159}, {0x3157, 0x3163, 0x315a}, {0x315c, 0x3153, 0x315d},
-                                    {0x315c, 0x3154, 0x315e}, {0x315c, 0x3163, 0x315f}, {0x3161, 0x3163, 0x3162}};
-    for (size_t i = 0; i < sizeof T / sizeof T[0]; i++)
-        if (T[i][0] == a && T[i][1] == b) return T[i][2];
-    return 0;
+static bool composing;
+static bool text_on;
+
+// 커서 앞 글자 + extra + 커서 뒤 글자로 칸을 다시 쓴다. 커서는 그대로다.
+static void field_show(const char *extra, int n) {
+    cpu_t *c = &cpu;
+    int pos = (int16_t)R16_(c, FIELD + F_POS);
+    char *t = field_text();
+    const char *tail = (const char *)c->m + FIELD + F_TAIL;
+    int room = TEXT_CAP - 1 - pos, tail_n = (int)strnlen(tail, TEXT_CAP);
+    if (n + tail_n > room) n = room > tail_n ? room - tail_n : 0;
+    memset(t + pos, 0, (size_t)(TEXT_CAP - pos));
+    memcpy(t + pos, extra, (size_t)n);
+    memcpy(t + pos + n, tail, (size_t)(tail_n < room - n ? tail_n : room - n));
+    W8_(c, FIELD + F_COMPOSE_W, (uint32_t)ime_text_width(extra, n));
 }
 
-// 한글 키 처리. 끝난 글자는 commit에 쓰고 길이를 돌려준다.
-static int hangul_key(int d, bool same, char *commit) {
-    int out = 0;
-    commit[0] = 0;
-    if (VOWEL[d][0]) {
-        int n = 0;
-        while (n < 9 && VOWEL[d][n]) n++;
-        uint16_t v = VOWEL[d][same ? tap % n : 0];
-        if (h_jong && !same) { // 받침이 다음 글자 초성으로 넘어간다.
-            uint16_t c = h_jong;
-            h_jong = 0;
-            out = hangul_compose(commit);
-            h_cho = c; h_jung = v;
-            return out;
-        }
-        if (same && h_jung) { h_jung = v; return 0; }
-        if (h_jung) {
-            uint16_t m = compound(h_jung, v);
-            if (m) { h_jung = m; return 0; }
-            out = hangul_compose(commit);
-            h_cho = 0; h_jong = 0; h_jung = v;
-            return out;
-        }
-        h_jung = v;
-        return 0;
+static void field_commit(const char *s, int n) {
+    cpu_t *c = &cpu;
+    int pos = (int16_t)R16_(c, FIELD + F_POS), max = (int16_t)R16_(c, FIELD + F_MAX);
+    int tail_n = (int)strnlen((const char *)c->m + FIELD + F_TAIL, TEXT_CAP);
+    if (max == NAME_FIELD_MAX) max = NAME_BYTES; // 이름 칸(닉네임, 받는 사람, 검색)은 패킷이 10바이트라 넘치면 글자가 잘린다
+    if (pos + tail_n + n > max) return;
+    memcpy(field_text() + pos, s, (size_t)n);
+    W16_(c, FIELD + F_POS, (uint32_t)(pos + n));
+    field_show("", 0);
+}
+
+static uint32_t utf8_next(const char **p) {
+    return SDL_StepUTF8(p, NULL);
+}
+
+void ime_text(const char *utf8) {
+    composing = false;
+    field_show("", 0);
+    for (uint32_t u; (u = utf8_next(&utf8)) != 0;) {
+        char o[2];
+        int n = to_euckr(u, o);
+        if (n) field_commit(o, n);
     }
-    if (!CONS[d][0]) return 0;
+}
+
+// 조합 중인 글자는 칸에 보이기만 하고 커서를 옮기지 않는다.
+void ime_compose(const char *utf8) {
+    char o[COMPOSE_MAX];
     int n = 0;
-    while (n < 4 && CONS[d][n]) n++;
-    uint16_t c = CONS[d][same ? tap % n : 0];
-    if (same && h_jong) { // 받침 순환. 받침이 될 수 없으면 건너뛴다.
-        if (JONG_OF[J(c)] >= 0) h_jong = c;
-        return 0;
-    }
-    if (same && h_cho && !h_jung) { h_cho = c; return 0; }
-    if (h_cho && h_jung && !h_jong && JONG_OF[J(c)] >= 0) { h_jong = c; return 0; }
-    out = hangul_compose(commit);
-    h_cho = c; h_jung = 0; h_jong = 0;
-    return out;
+    for (uint32_t u; (u = utf8_next(&utf8)) != 0 && n + 2 <= COMPOSE_MAX;) n += to_euckr(u, o + n);
+    composing = n > 0;
+    field_show(o, n);
 }
 
-static char alpha_letter(int d, int t) {
-    static const char *const L[10] = {"", "", "abc", "def", "ghi", "jkl", "mno", "pqrs", "tuv", "wxyz"};
-    int n = (int)strlen(L[d]);
-    return n ? L[d][t % n] : 0;
+// 칸의 화면 위치를 입력기 후보 창에 알린다.
+static void set_area(void) {
+    SDL_Window *win = host_window();
+    SDL_Rect area;
+    int w, h;
+    SDL_GetWindowSize(win, &w, &h);
+    area.x = w / 4; area.w = w / 2; area.y = h / 2; area.h = h / 16;
+    SDL_SetTextInputArea(win, &area, 0);
 }
 
-static void reset_compose(void) { h_cho = h_jung = h_jong = 0; alpha_comp = 0; last_key = -1; tap = 0; }
+bool ime_active(void) { return cpu.m[FIELD_OPEN] != 0; }
 
-// MC_imHandleInput(key, 2, commit, &commit_len, compose, &compose_len). 버퍼는 5바이트다(0x104f86).
-static void handle_input(cpu_t *c) {
-    uint32_t key = c->r[0] & 0xff, commit_a = c->r[2], commit_len_a = c->r[3], compose_a = arg(c, 4), compose_len_a = arg(c, 5);
-    char commit[5] = {0}, compose[5] = {0};
-    uint64_t now = now_ms();
-    if (key == FLUSH_KEY) { // 커서 이동, 지우기 전에 조합을 끝낸다.
-        if (alpha_comp) commit[0] = alpha_comp;
-        else hangul_compose(commit);
-        reset_compose();
-    } else if (key >= '0' && key <= '9') {
-        int d = (int)key - '0';
-        bool same = last_key == (int)key && now - last_ms < TAP_MS;
-        tap = same ? tap + 1 : 0;
-        if (mode == MODE_DIGIT) {
-            commit[0] = (char)key;
-        } else if (mode == MODE_ALPHA) {
-            char l = alpha_letter(d, tap);
-            if (!l) { // 1, 0은 숫자를 그대로 넣는다.
-                commit[0] = alpha_comp ? alpha_comp : (char)key;
-                commit[1] = alpha_comp ? (char)key : 0;
-                alpha_comp = 0;
-            } else {
-                if (!same && alpha_comp) commit[0] = alpha_comp;
-                alpha_comp = l;
-                compose[0] = l;
-            }
-        } else {
-            hangul_key(d, same, commit);
-            hangul_compose(compose);
+// 칸이 열리고 닫힐 때 플랫폼 입력기(Android는 화면 키보드)를 켜고 끈다.
+void ime_poll(void) {
+    bool on = ime_active();
+    if (on == text_on) return;
+    text_on = on;
+    composing = false;
+    SDL_Window *win = host_window();
+    if (on) { set_area(); SDL_StartTextInput(win); }
+    else SDL_StopTextInput(win);
+}
+
+// 칸이 열려 있는 동안 키보드는 글자 입력이다. 게임으로는 조작 키만 보낸다. 처리했으면 true.
+bool ime_event(const SDL_Event *e) {
+    if (!ime_active()) return false;
+    switch (e->type) {
+    case SDL_EVENT_TEXT_INPUT: ime_text(e->text.text); return true;
+    case SDL_EVENT_TEXT_EDITING: ime_compose(e->edit.text); return true;
+    case SDL_EVENT_FINGER_UP: // 화면 키보드를 내렸으면 화면을 눌러 다시 연다.
+        if (SDL_HasScreenKeyboardSupport() && !SDL_ScreenKeyboardShown(host_window())) SDL_StartTextInput(host_window());
+        return false;
+    case SDL_EVENT_KEY_DOWN: case SDL_EVENT_KEY_UP: {
+        int k = 0;
+        switch (e->key.scancode) {
+        case SDL_SCANCODE_BACKSPACE: case SDL_SCANCODE_AC_BACK: k = KEY_CLEAR; break;
+        case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: k = KEY_OK; break;
+        case SDL_SCANCODE_UP: k = KEY_UP; break;
+        case SDL_SCANCODE_DOWN: k = KEY_DOWN; break;
+        case SDL_SCANCODE_LEFT: k = KEY_LEFT; break;
+        case SDL_SCANCODE_RIGHT: k = KEY_RIGHT; break;
+        case SDL_SCANCODE_F11: return false;
+        default: return true;
         }
-        last_key = (int)key;
-        last_ms = now;
+        if (composing) return true; // 입력기가 쓰는 키다
+        if (e->type == SDL_EVENT_KEY_DOWN) host_key(2, k);
+        else if (!e->key.repeat) host_key(3, k);
+        return true;
     }
-    int cl = (int)strlen(commit), pl = (int)strlen(compose);
-    memcpy(c->m + commit_a, commit, 5);
-    memcpy(c->m + compose_a, compose, 5);
-    W32_(c, commit_len_a, (uint32_t)cl);
-    W32_(c, compose_len_a, (uint32_t)pl);
-    c->r[0] = cl + pl > 0;
+    }
+    return false;
 }
 
+// 글자는 ime_text가 넣으므로 게임이 묻는 키 입력에는 돌려줄 글자가 없다. 표시 모드는 고정한다.
 void ime_api(cpu_t *c, uint32_t i) {
     switch (i) {
-    case 0: handle_input(c); break;
-    case 1:
-        if (mode != (int)c->r[0]) reset_compose();
-        mode = (int)c->r[0];
+    case 0:
+        memset(c->m + c->r[2], 0, 5);
+        memset(c->m + arg(c, 4), 0, 5);
+        W32_(c, c->r[3], 0);
+        W32_(c, arg(c, 5), 0);
         c->r[0] = 0;
         break;
-    case 2: c->r[0] = (uint32_t)mode; break;
+    case 2: c->r[0] = MODE_HANGUL; break;
     default: c->r[0] = 0;
     }
 }

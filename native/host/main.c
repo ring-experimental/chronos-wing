@@ -280,6 +280,8 @@ static void ctrl_poll(void) {
             if (k) { send_key(2, k); release_code = k; release_at = now_ms() + 150; }
         } else if (!strncmp(lines[i], "shot ", 5)) write_shot(lines[i] + 5);
         else if (!strncmp(lines[i], "winshot ", 8)) { static char p[1100]; snprintf(p, sizeof p, "%s", lines[i] + 8); winshot_path = p; frame_dirty = true; }
+        else if (!strncmp(lines[i], "text ", 5)) ime_text(lines[i] + 5);
+        else if (!strncmp(lines[i], "edit ", 5)) ime_compose(lines[i] + 5);
         else if (!strcmp(lines[i], "settings")) ui_toggle_settings();
         else if (!strncmp(lines[i], "finger ", 7) || !strncmp(lines[i], "mouse ", 6)) inject_pointer(lines[i]);
         else if (!strcmp(lines[i], "quit")) running = false;
@@ -338,6 +340,7 @@ int main(int argc, char **argv) {
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 #endif
     SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "1");
+    SDL_SetHint(SDL_HINT_IME_IMPLEMENTED_UI, "composition");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) { SDL_Log("SDL_Init: %s", SDL_GetError()); return 1; }
 #ifdef __ANDROID__
     if (!android_prepare_data()) { SDL_Log("게임 데이터 풀기 실패: %s", SDL_GetError()); SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "크로노스 윙", "게임 데이터를 풀지 못했습니다.", NULL); return 1; }
@@ -383,6 +386,7 @@ int main(int argc, char **argv) {
                 if (e.type == SDL_EVENT_QUIT) { SDL_Log("종료 이벤트"); running = false; }
                 else if (e.type == SDL_EVENT_WILL_ENTER_BACKGROUND) ui_release_all();
                 if (ui_event(&e)) continue;
+                if (ime_event(&e)) continue;
                 else if ((e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) && !e.key.repeat) {
                     if (e.key.scancode == SDL_SCANCODE_F11 && e.type == SDL_EVENT_KEY_DOWN) {
                         windowed = !windowed;
@@ -396,6 +400,7 @@ int main(int argc, char **argv) {
         }
         ctrl_poll();
         savefile_poll();
+        ime_poll();
         // 설정 중이나 파일 창이 열린 동안에는 게임을 멈춘다.
         bool modal = ui_modal() || savefile_dialog_open();
         if (modal != paused) { paused = modal; audio_pause(paused); }

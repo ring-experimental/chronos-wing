@@ -165,7 +165,7 @@ void gfx_api(cpu_t *c, uint32_t i) {
     case 15: { fb_t b = fb_get(r[0]); draw_arc(&b, (int)r[1], (int)r[2], (int)r[3], (int)arg(c, 4), (int)arg(c, 5), (int)arg(c, 6), fg(arg(c, 7))); break; }
     case 16: { fb_t b = fb_get(r[0]); fill_arc(&b, (int)r[1], (int)r[2], (int)r[3], (int)arg(c, 4), (int)arg(c, 5), (int)arg(c, 6), fg(arg(c, 7))); break; }
     case 17: { // DrawString(fb,x,y,str,len,gc). TextComponent(0x10796c)만 쓴다. 글꼴은 게임 것이므로 게임 함수로 그린다. 색은 호출자가 이미 정했다.
-        enum { FN_DRAW_TEXT = 0x12c1ec, TEXT_MAX = 100, BASELINE = 13 };
+        enum { FN_DRAW_TEXT = 0x12c1ec, TEXT_MAX = 100, BASELINE = 10 };
         uint32_t a[6] = {r[0], r[1], r[2] - BASELINE, r[3], TEXT_MAX, 0}; // DrawString의 y는 글자 아래선, 게임 함수는 위선이다.
         guest_call(FN_DRAW_TEXT | 1, a, 6);
         break;
@@ -187,7 +187,11 @@ void gfx_api(cpu_t *c, uint32_t i) {
         break;
     }
     case 26: r[0] = 0; break;
-    case 30: r[0] = 0; break;
+    case 30: { // GetStringWidth(font,str,len). 입력 칸의 커서 위치에 쓴다. len < 0이면 끝까지다.
+        const char *t = gstr(r[1]);
+        r[0] = (uint32_t)ime_text_width(t, (int)r[2] < 0 ? (int)strlen(t) : (int)r[2]);
+        break;
+    }
     default:
         fprintf(stderr, "그래픽 API %u 미구현\n", i);
         r[0] = 0;
