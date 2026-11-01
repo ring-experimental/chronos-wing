@@ -112,6 +112,10 @@ bool ln_staff(ln_req *q);   // 대분류 1, 소분류 20~27
 bool ln_sleep(ln_req *q);   // 대분류 1, 소분류 30~33
 bool ln_cash(ln_req *q);    // 대분류 1, 소분류 40~41
 bool ln_shadow(ln_req *q);  // 대분류 2
+void ln_shadow_tick(void);  // 접속 유지마다. 가상 함장의 공격과 날짜 변경 처리
+// 가상 공격 전적. 오래된 것부터다. 1.10, 1.11(우편 쪽)이 읽는다.
+int ln_shadow_log_count(void);
+void ln_shadow_log_at(int i, uint64_t *id, const char **title, const char **body);
 bool ln_depot(ln_req *q);   // 대분류 3, 소분류 1~8
 bool ln_auction(ln_req *q); // 대분류 3, 소분류 20~21
 bool ln_backup(ln_req *q);  // 대분류 4
