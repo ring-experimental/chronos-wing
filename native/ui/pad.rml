@@ -17,16 +17,20 @@
     <div class="btn skill" code="55" style="left:0;top:1.75em;"><span class="n">7</span></div>
     <div class="btn skill" code="57" style="left:0.55em;top:0;"><span class="n">9</span></div>
   </div>
-  <div id="aux" class="group" style="width:2.7em;height:0.8em;" data-if="edit || !dialog" data-style-left="g[3].left" data-style-top="g[3].top" data-style-font-size="g[3].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 3">
-    <div class="btn small" code="42" style="left:0em;"><div class="icon i-bag"></div></div>
-    <div class="btn small" code="35" style="left:0.95em;"><div class="icon i-map"></div></div>
-    <div class="btn small" code="-16" style="left:1.9em;"><div class="icon i-menu"></div></div>
+  <div id="aux" class="group" style="width:0.8em;height:0.8em;" data-if="edit || !dialog" data-style-left="g[3].left" data-style-top="g[3].top" data-style-font-size="g[3].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 3">
+    <div class="btn small" code="35" style="left:0em;"><div class="icon i-map"></div></div>
   </div>
   <div id="sys" class="group" style="width:0.8em;height:0.8em;" data-if="edit || !dialog" data-style-left="g[4].left" data-style-top="g[4].top" data-style-font-size="g[4].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 4">
     <div class="btn small" action="settings" style="left:0em;"><div class="icon i-gear"></div></div>
   </div>
   <div id="skip" class="group" style="width:1.6em;height:0.8em;" data-if="edit || dialog" data-style-left="g[5].left" data-style-top="g[5].top" data-style-font-size="g[5].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 5">
-    <div class="btn pill" code="35"><span class="t">SKIP ▶</span></div>
+    <div class="btn pill" code="35"><span class="t">SKIP</span></div>
+  </div>
+  <div id="item" class="group" style="width:1em;height:1em;" data-if="edit || !dialog" data-style-left="g[6].left" data-style-top="g[6].top" data-style-font-size="g[6].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 6">
+    <div class="btn item" code="42"><div class="icon i-bag"></div></div>
+  </div>
+  <div id="menu" class="group" style="width:0.8em;height:0.8em;" data-if="edit || !dialog" data-style-left="g[7].left" data-style-top="g[7].top" data-style-font-size="g[7].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 7">
+    <div class="btn small" code="-16"><div class="icon i-menu"></div></div>
   </div>
 </div>
 </body>

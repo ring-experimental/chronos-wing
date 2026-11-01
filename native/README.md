@@ -33,6 +33,6 @@ Android는 첫 실행 때 APK 안의 데이터를 푼다. 뒤로 키는 CLEAR다
 - WIPI API 동작: [WIE](https://github.com/dlunch/wie) (MIT). 소스를 참고해 C로 옮겼고 링크하지 않는다.
 - SMAF 변환(빌드 때만): smaf-player (MIT).
 - 플랫폼 계층: SDL3 (zlib).
-- UI: RmlUi (MIT), FreeType (FTL), Pretendard (OFL, `third_party/Pretendard-LICENSE.txt`).
+- UI: RmlUi (MIT), FreeType (FTL). 글꼴은 빌드 때 게임 폰트(`ft/`)에서 만든다(`work/tools/hnf2ttf.py`).
 - MIDI 합성: TinySoundFont (MIT), `third_party/tsf.h`.
 - 사운드폰트: 1MGM (CC BY 3.0), `third_party/1mgm.txt`.

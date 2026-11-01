@@ -19,3 +19,5 @@ native/build/
 work/tools/smaf2ev/target/
 work/tools/smaf2ev/Cargo.lock
 work/saves/
+
+__pycache__/

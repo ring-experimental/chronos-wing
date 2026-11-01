@@ -1,5 +1,5 @@
 /* 게임 위에 얹는 UI. 1dp는 게임 화면 1픽셀(높이 320 기준)이다. */
-body { font-family: Pretendard; font-size: 12dp; color: #fff; width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+body { font-family: ChronosGame; font-size: 11dp; color: #fff; width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
 div, span, h1, button, input { display: block; }
 span { display: inline-block; }
 
@@ -28,7 +28,10 @@ span { display: inline-block; }
 .skill.on { decorator: image(skill_on.png); }
 .small { width: 0.8em; height: 0.8em; decorator: image(small.png); }
 .small.on { decorator: image(small_on.png); }
+.item { decorator: image(small.png); }
+.item.on { decorator: image(small_on.png); }
 .icon { position: absolute; left: 0.17em; top: 0.17em; width: 0.46em; height: 0.46em; }
+.item .icon { left: 0.2em; top: 0.2em; width: 0.6em; height: 0.6em; }
 .i-bag { decorator: image(i_bag.png); }
 .i-map { decorator: image(i_map.png); }
 .i-menu { decorator: image(i_menu.png); }
@@ -37,30 +40,32 @@ span { display: inline-block; }
 .pill.on { decorator: image(pill_on.png); }
 /* 글자 칸을 버튼 전체로 잡는다. line-height는 글자 자신의 크기 기준이라 버튼 높이 / 글자 크기로 쓴다. */
 .btn .n, .btn .t { display: block; width: 100%; height: 100%; text-align: center; }
-.orb .n { font-size: 0.56em; line-height: 2.857em; }
-.skill .n { font-size: 0.56em; line-height: 1.786em; }
-.pill .t { font-size: 0.36em; line-height: 2.222em; }
+.orb .n { font-size: 0.647em; line-height: 2.473em; }
+/* 가변폭 글자는 오른쪽에 1픽셀 여백이 있어 한 글자 버튼은 그만큼 민다. */
+.skill .n { font-size: 0.647em; line-height: 1.546em; padding-left: 2dp; box-sizing: border-box; }
+.pill .t { font-size: 0.647em; line-height: 1.236em; }
 
-.modal { background-color: #000000aa; z-index: 10; }
-.panel { position: absolute; left: 50%; top: 50%; width: 260dp; margin-left: -130dp; margin-top: -90dp; padding: 12dp; background-color: #183c70f5; border: 2dp #f8c400; border-radius: 6dp; box-sizing: border-box; }
-h1 { font-size: 15dp; margin-bottom: 12dp; text-align: center; }
-.row { height: 26dp; line-height: 22dp; margin-bottom: 4dp; }
-.row span { width: 70dp; }
-.buttons { margin-top: 10dp; text-align: center; }
-button { display: inline-block; height: 26dp; line-height: 24dp; padding: 0 10dp; margin: 0 3dp; background-color: #305ca8; border: 1dp #f8c400; border-radius: 3dp; text-align: center; }
+/* 설정 화면과 편집 막대는 글자 크기(em)와 비율로 잡아 화면과 글자에 맞춰 늘어난다. */
+.modal { background-color: #000000aa; z-index: 10; display: flex; justify-content: center; align-items: center; }
+.panel { width: 24em; max-width: 92%; padding: 1em; background-color: #183c70f5; border: 0.18em #f8c400; border-radius: 0.5em; box-sizing: border-box; }
+h1 { margin-bottom: 1em; text-align: center; }
+.row { display: flex; align-items: center; min-height: 2.2em; margin-bottom: 0.4em; }
+.row span { flex: 0 0 28%; }
+.buttons { display: flex; margin-top: 0.8em; }
+button { flex: 1 1 auto; height: 2.2em; line-height: 2.2em; padding: 0 0.8em; margin: 0 0.25em; background-color: #305ca8; border: 0.09em #f8c400; border-radius: 0.3em; text-align: center; box-sizing: border-box; }
 button:hover { background-color: #3f73c8; }
 button:active { background-color: #6b8fc7; }
 
-input.range { display: inline-block; width: 150dp; height: 20dp; vertical-align: middle; }
-input.range slidertrack { height: 6dp; margin-top: 7dp; background-color: #0a162e; border-radius: 3dp; }
-input.range sliderbar { width: 14dp; height: 20dp; background-color: #f8c400; border-radius: 3dp; }
+input.range { display: block; flex: 1 1 auto; height: 1.8em; }
+input.range slidertrack { height: 0.5em; margin-top: 0.65em; background-color: #0a162e; border-radius: 0.25em; }
+input.range sliderbar { width: 1.2em; height: 1.8em; background-color: #f8c400; border-radius: 0.25em; }
 input.range sliderbar:active { background-color: #d5e4f8; }
 input.range sliderarrowdec, input.range sliderarrowinc { width: 0; height: 0; }
-input.checkbox { display: inline-block; width: 20dp; height: 20dp; background-color: #0d1420; border: 1dp #7f9fc9; border-radius: 3dp; vertical-align: middle; }
+input.checkbox { display: block; width: 1.8em; height: 1.8em; background-color: #0a162e; border: 0.09em #f8c400; border-radius: 0.25em; box-sizing: border-box; }
 input.checkbox:checked { background-color: #f8c400; }
 
 /* 막대 밖은 패드 묶음을 끌 수 있게 통과시킨다. */
-.editbar-root { pointer-events: none; z-index: 10; }
-.editbar { pointer-events: auto; position: absolute; top: 4dp; left: 50%; width: 320dp; margin-left: -160dp; height: 32dp; line-height: 28dp; padding: 2dp 6dp; background-color: #183c70f5; border: 2dp #f8c400; border-radius: 6dp; box-sizing: border-box; text-align: center; }
-.editbar span { width: 140dp; font-size: 10dp; pointer-events: auto; }
-.editbar button { pointer-events: auto; }
+.editbar-root { pointer-events: none; z-index: 10; display: flex; justify-content: center; align-items: flex-end; }
+.editbar { pointer-events: auto; display: flex; align-items: center; width: 62%; height: 2.8em; margin-bottom: 0.4em; padding: 0 0.3em; background-color: #183c70f5; border: 0.18em #f8c400; border-radius: 0.5em; box-sizing: border-box; }
+.editbar span { flex: 1 1 auto; text-align: center; pointer-events: auto; }
+.editbar button { flex: 0 0 auto; pointer-events: auto; }

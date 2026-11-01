@@ -38,7 +38,7 @@ wait
 $CC++ -shared -static-libstdc++ -Wl,-z,max-page-size=16384 $OBJS -L$O/lib/lib/$ABI -L$RML/lib -lrmlui -lfreetype -lSDL3 -lm -landroid -llog -o $O/lib/lib/$ABI/libmain.so
 
 # 자바와 패키징
-python3 $HERE/mkpak.py $B $O/assets/game.pak $N/ui
+python3 $HERE/mkpak.py $B $O/assets/game.pak $B/ui
 $JDK/javac -nowarn -source 8 -target 8 -cp $JAR -d $O/java $SRC/android-project/app/src/main/java/org/libsdl/app/*.java 2>/dev/null
 $BT/d8 --release --lib $JAR --min-api $API --output $O $O/java/org/libsdl/app/*.class
 $BT/aapt2 link -o $O/base.apk -I $JAR --manifest $HERE/AndroidManifest.xml -A $O/assets

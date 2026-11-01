@@ -52,8 +52,11 @@ $(call RML,mac)/lib/librmlui.a:
 $(B)/%.o: host/%.cpp $(UIDEPS) $(call RML,mac)/lib/librmlui.a
 	c++ -O2 -g -std=c++17 -DRMLUI_STATIC_LIB -Ihost -I/opt/homebrew/include -I$(call RML,mac)/include -c $< -o $@
 
-$(B)/ui: $(wildcard ui/*)
-	rm -rf $@ && cp -R ui $@ && touch $@
+# UI 폰트는 게임 비트맵 폰트에서 만든다.
+$(B)/ui: $(wildcard ui/*) $(ROOT)/work/tools/hnf2ttf.py $(GAME)/client.bin
+	rm -rf $@ && cp -R ui $@
+	$(PY) $(ROOT)/work/tools/hnf2ttf.py $(GAME) $@/ChronosGame.ttf
+	touch $@
 
 # MMF를 이벤트로 바꾸는 도구는 빌드 때만 쓴다(smaf-player, MIT). 결과만 실행 파일 옆에 둔다.
 $(B)/game.ev: $(GAME)/client.bin
@@ -66,10 +69,10 @@ WSDL := $(B)/deps/mingw/x86_64-w64-mingw32
 WOBJ := $(HOSTSRC:host/%.c=$(WIN)/obj/%.o) $(RESTSRC:restored/%.c=$(WIN)/obj/r_%.o) $(UISRC:host/%.cpp=$(WIN)/obj/%.o)
 WRML := $(call RML,win)
 
-windows: $(WIN)/chronos.exe $(GAME)/client.bin $(B)/game.ev $(B)/1mgm.sf2
+windows: $(WIN)/chronos.exe $(GAME)/client.bin $(B)/game.ev $(B)/1mgm.sf2 $(B)/ui
 	cp $(WSDL)/bin/SDL3.dll $(B)/game.ev $(B)/1mgm.sf2 $(WIN)/
 	cp "$$(find $$(dirname $$(dirname $$(realpath $$(which $(WCC))))) -name libwinpthread-1.dll | grep x86_64 | head -1)" $(WIN)/
-	rm -rf $(WIN)/ui && cp -R ui $(WIN)/ui
+	rm -rf $(WIN)/ui && cp -R $(B)/ui $(WIN)/ui
 	rm -rf $(WIN)/game && mkdir -p $(WIN)/game
 	cd $(GAME) && find . -type f ! -name client.bin474328 ! -path './META-INF/*' -exec sh -c 'mkdir -p "$$0/$$(dirname "$$1")" && cp "$$1" "$$0/$$1"' "$(abspath $(WIN))/game" {} \;
 
@@ -99,7 +102,7 @@ $(WIN)/obj/manifest.o: windows/chronos.rc windows/chronos.manifest
 	mkdir -p $(WIN)/obj
 	x86_64-w64-mingw32-windres $< -o $@
 
-android: $(B)/tr.c $(GAME)/client.bin $(B)/game.ev $(B)/1mgm.sf2
+android: $(B)/tr.c $(GAME)/client.bin $(B)/game.ev $(B)/1mgm.sf2 $(B)/ui
 	[ -f $(call RML,android)/lib/librmlui.a ] || ./deps.sh android
 	android/build.sh
 

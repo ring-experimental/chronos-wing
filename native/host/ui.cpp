@@ -24,9 +24,11 @@ Group groups[] = {
     {"dpad", 0.14f, 0.73f, 3.f, 3.f},
     {"ok", 0.91f, 0.80f, 1.6f, 1.6f},
     {"skill", 0.80f, 0.74f, 1.55f, 2.75f},
-    {"aux", 0.84f, 0.06f, 2.7f, 0.8f},
+    {"aux", 0.95f, 0.06f, 0.8f, 0.8f},
     {"sys", 0.04f, 0.06f, 0.8f, 0.8f},
     {"skip", 0.91f, 0.60f, 1.6f, 0.8f},
+    {"item", 0.91f, 0.60f, 1.f, 1.f},
+    {"menu", 0.91f, 0.48f, 0.8f, 0.8f},
 };
 constexpr float BASE_DP = 34.f;
 
@@ -255,7 +257,7 @@ extern "C" bool ui_init(SDL_Window *win, SDL_Renderer *ren, const char *ui_dir, 
     Rml::SetRenderInterface(render_if);
     if (!Rml::Initialise()) return false;
     std::string dir = ui_dir;
-    if (!Rml::LoadFontFace(dir + "/Pretendard-Medium.otf", true)) return false;
+    if (!Rml::LoadFontFace(dir + "/ChronosGame.ttf", true)) return false;
     ctx = Rml::CreateContext("main", {640, 320});
     bind_model();
 #ifdef __ANDROID__
