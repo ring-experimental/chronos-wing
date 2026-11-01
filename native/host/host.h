@@ -82,6 +82,8 @@ uint32_t audio_load(const uint8_t *data, uint32_t size);
 void audio_play(uint32_t handle, bool repeat);
 void audio_stop(uint32_t handle);
 void audio_free(uint32_t handle);
+void audio_sfx_scope(bool in_sfx);
+void audio_music_stop(void);
 
 // 그래픽 API (표 3)
 void gfx_api(cpu_t *c, uint32_t index);

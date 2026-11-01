@@ -1,4 +1,5 @@
-// 소리. MMF를 미리 바꾼 이벤트 파일(smaf2ev)을 내용 해시로 찾아 재생한다. MIDI는 TinySoundFont(MIT), 파형은 직접 섞는다.
+// 소리. MMF를 미리 바꾼 이벤트 파일(smaf2ev)을 내용 해시로 찾아 재생한다. MIDI는 TinySoundFont(MIT)로 합성한다.
+// 곡 하나와 효과음마다 SDL_AudioStream을 두어 한 장치에 묶고, 섞기와 샘플링 변환은 SDL에 맡긴다.
 #include "host.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -10,16 +11,19 @@
 typedef struct { uint32_t time; uint8_t kind, ch; uint32_t rate, len; const uint8_t *data; } ev_t;
 typedef struct { uint64_t hash; uint32_t n; ev_t *ev; uint32_t duration; bool has_wave; } seq_t;
 typedef struct { bool on, repeat; seq_t *s; uint32_t next; uint64_t pos; uint32_t handle; } play_t;
-typedef struct { bool on; const int16_t *s; uint32_t n; double pos, step; uint32_t handle; } wave_t;
+typedef struct { bool on, repeat; const int16_t *s; uint32_t n, pos, rate; int fade; uint32_t handle; uint64_t order; SDL_AudioStream *st; } wave_t;
 
 static uint8_t *blob;
 static seq_t *seqs;
 static uint32_t nseq;
 static tsf *synth;
 static SDL_Mutex *lock;
+static SDL_AudioDeviceID device;
 static SDL_AudioStream *stream;
 static play_t plays[16];
-static wave_t waves[16];
+#define WAVE_STREAMS 24
+#define WAVE_ACTIVE 16 // 이보다 많이 겹치면 가장 오래된 효과음을 줄여 끈다.
+static wave_t waves[WAVE_STREAMS];
 static seq_t **handles;
 static uint32_t nhandles;
 float audio_peak;
@@ -66,61 +70,53 @@ static void midi(const uint8_t *m, uint32_t n) {
     }
 }
 
-// 곡 사이에 서스테인 페달 같은 채널 상태가 남으면 다음 곡의 음이 끝나지 않고 쌓인다.
+// 반복과 곡 끝. 페달을 풀고 음을 놓아 음이 쌓이지 않게 한다.
+// CC121은 울리고 있는 음의 게인과 팬까지 바꿔 음이 튀므로 여기서 쓰지 않는다.
 static void synth_reset(void) {
     if (!synth) return;
-    // TinySoundFont의 CC121은 페달을 풀지 않아 CC64를 따로 끈다.
-    for (int ch = 0; ch < 16; ch++) {
-        tsf_channel_midi_control(synth, ch, 64, 0);
-        tsf_channel_midi_control(synth, ch, 121, 0);
-    }
+    for (int ch = 0; ch < 16; ch++) tsf_channel_midi_control(synth, ch, 64, 0);
     tsf_note_off_all(synth);
+}
+
+// 페이드가 끝나 들리지 않을 때 음과 채널 상태를 모두 지운다.
+static void synth_clear(void) {
+    static float discard[128];
+    if (!synth) return;
+    tsf_reset(synth);
+    for (int c = 0; c < 16; c++) tsf_channel_set_presetnumber(synth, c, 0, c == 9);
+    tsf_render_float(synth, discard, 64, 0); // 끝난 음을 비운다.
 }
 
 static void run_events(play_t *p) {
     uint64_t now_ms = p->pos * 1000 / RATE;
     while (p->next < p->s->n && p->s->ev[p->next].time <= now_ms) {
         ev_t *e = &p->s->ev[p->next++];
-        if (e->kind == 0) { if (synth && !p->s->has_wave) midi(e->data, e->len); }
-        else {
-            for (int w = 0; w < 16; w++)
-                if (!waves[w].on) {
-                    waves[w] = (wave_t){true, (const int16_t *)e->data, e->len, 0, (double)e->rate / RATE, p->handle};
-                    break;
-                }
-        }
+        if (e->kind == 0 && synth) midi(e->data, e->len);
     }
     if (p->next >= p->s->n && p->pos * 1000 / RATE >= p->s->duration) {
-        if (!p->s->has_wave) synth_reset();
+        synth_reset();
         if (p->repeat && p->s->duration) { p->pos = 0; p->next = 0; }
         else p->on = false;
     }
 }
 
-// 원본은 소리를 하나만 내는 기기용이라 효과음마다 "배경음 정지, 효과음 재생, 효과음 정지, 배경음 처음부터 재생"을 호출한다.
-// 함께 들리도록 이 순서를 해석한다. 효과음이 끼어든 정지는 무시하고, 같은 곡 재생은 이어서 튼다.
-// 전투처럼 효과음이 이어지면 배경음 재생 요청이 수십 초 뒤에 오기도 한다. 효과음 호출 간격은 최대 1.5초였으므로
-// 그보다 넉넉히 조용할 때만 실제 정지로 본다.
-#define MUSIC_STOP_WAIT_MS 100
-#define MUSIC_SFX_QUIET_MS 3000
-static uint64_t music_stop_at;
-static uint32_t interrupting_sfx;
+// 원본은 소리를 하나만 내는 기기용이라 클립이 하나뿐이고, 효과음을 낼 때 그 클립에 있던 배경음을 끈다.
+// 함께 들리도록 게임의 효과음 함수 안에서 온 정지는 배경음에 적용하지 않는다(restored/sound.c).
+// 그 밖의 정지와 배경음 해제(0x174200)는 실제 정지다.
+#define MUSIC_FADE_FRAMES (RATE / 25) // 40ms
+static int music_fade;
+static bool sfx_scope;
 
 static play_t *music_play(void) {
-    for (int i = 0; i < 16; i++) if (plays[i].on && !plays[i].s->has_wave) return &plays[i];
+    for (int i = 0; i < 16; i++) if (plays[i].on) return &plays[i];
     return NULL;
 }
 
-static void music_clear_stop(void) { music_stop_at = 0; interrupting_sfx = 0; }
-
+// 곡을 끊지 않고 줄여서 끈다. 다음 곡은 페이드와 synth_clear 뒤에 시작한다.
 static void music_stop_now(void) {
     play_t *m = music_play();
-    if (m) { m->on = false; synth_reset(); }
-    music_clear_stop();
-}
-
-static void music_check_stop(void) {
-    if (music_stop_at && SDL_GetTicks() >= music_stop_at) music_stop_now();
+    if (m) m->on = false;
+    if (!music_fade) music_fade = MUSIC_FADE_FRAMES;
 }
 
 static void SDLCALL audio_cb(void *ud, SDL_AudioStream *st, int additional, int total) {
@@ -130,37 +126,140 @@ static void SDLCALL audio_cb(void *ud, SDL_AudioStream *st, int additional, int 
     while (frames > 0) {
         int n = frames > 256 ? 256 : frames; // 이벤트 시각 해상도 약 6ms
         SDL_LockMutex(lock);
-        music_check_stop();
-        memset(buf, 0, sizeof(float) * 2 * n);
-        for (int i = 0; i < 16; i++) if (plays[i].on) { run_events(&plays[i]); plays[i].pos += n; }
+        if (!music_fade) for (int i = 0; i < 16; i++) if (plays[i].on) { run_events(&plays[i]); plays[i].pos += n; }
         if (synth) tsf_render_float(synth, buf, n, 0);
-        for (int w = 0; w < 16; w++) {
-            wave_t *v = &waves[w];
-            if (!v->on) continue;
+        else memset(buf, 0, sizeof(float) * 2 * n);
+        if (music_fade) {
             for (int k = 0; k < n; k++) {
-                uint32_t idx = (uint32_t)v->pos;
-                if (idx >= v->n) { v->on = false; break; }
-                float s = v->s[idx] / 65536.0f; // 효과음 여러 개가 겹쳐도 클리핑이 덜 나도록 절반으로 섞는다.
-                buf[k * 2] += s;
-                buf[k * 2 + 1] += s;
-                v->pos += v->step;
+                float g = music_fade > 0 ? (float)music_fade-- / MUSIC_FADE_FRAMES : 0;
+                buf[k * 2] *= g;
+                buf[k * 2 + 1] *= g;
             }
+            if (!music_fade) synth_clear();
         }
         SDL_UnlockMutex(lock);
-        for (int k = 0; k < n * 2; k++) {
-            float a = buf[k] < 0 ? -buf[k] : buf[k];
-            if (a > audio_peak) audio_peak = a;
-            if (buf[k] > 1) buf[k] = 1;
-            if (buf[k] < -1) buf[k] = -1;
-        }
         SDL_PutAudioStreamData(st, buf, n * 2 * (int)sizeof(float));
         frames -= n;
     }
 }
 
+// 파형 끝이 0이 아니면 딸깍거리므로 양 끝과 중간 정지를 짧게 줄인다. 원본 샘플 기준이다.
+#define WAVE_FADE_IN 8
+#define WAVE_FADE_OUT 40 // 8kHz에서 5ms
+
+static void SDLCALL wave_cb(void *ud, SDL_AudioStream *st, int additional, int total) {
+    wave_t *v = ud;
+    int16_t buf[256];
+    (void)total;
+    int frames = additional / (int)sizeof(int16_t);
+    while (frames > 0) {
+        int want = frames > 256 ? 256 : frames, n = 0;
+        bool ended = false;
+        SDL_LockMutex(lock);
+        if (!v->on) { SDL_UnlockMutex(lock); return; }
+        while (n < want) {
+            if (v->pos >= v->n) {
+                if (v->repeat) v->pos = 0;
+                else { ended = true; break; }
+            }
+            int g = 256;
+            if (!v->repeat) {
+                if (v->pos < WAVE_FADE_IN) g = g * (int)v->pos / WAVE_FADE_IN;
+                uint32_t left = v->n - v->pos;
+                if (left < WAVE_FADE_OUT) g = g * (int)left / WAVE_FADE_OUT;
+            }
+            if (v->fade > 0) {
+                g = g * v->fade / WAVE_FADE_OUT;
+                if (--v->fade == 0) ended = true;
+            }
+            buf[n++] = (int16_t)(v->s[v->pos++] * g / 256);
+            if (ended) break;
+        }
+        if (ended) v->on = false;
+        SDL_UnlockMutex(lock);
+        SDL_PutAudioStreamData(st, buf, n * (int)sizeof(int16_t));
+        frames -= n;
+        if (ended) {
+            // 변환기에 남은 샘플이 다음 소리 앞에 붙지 않게 0으로 밀어낸다.
+            static const int16_t zero[16];
+            SDL_PutAudioStreamData(st, zero, sizeof zero);
+            return;
+        }
+    }
+}
+
+static void wave_start(const ev_t *e, uint32_t handle, bool repeat) {
+    static uint64_t order;
+    wave_t *free_v = NULL, *oldest = NULL;
+    int active = 0;
+    SDL_LockMutex(lock);
+    for (int w = 0; w < WAVE_STREAMS; w++) {
+        wave_t *v = &waves[w];
+        if (!v->st) continue;
+        if (!v->on) { if (!free_v) free_v = v; continue; }
+        if (v->fade) continue;
+        active++;
+        if (!oldest || v->order < oldest->order) oldest = v;
+    }
+    if (active >= WAVE_ACTIVE && oldest) oldest->fade = WAVE_FADE_OUT;
+    SDL_UnlockMutex(lock);
+    if (!free_v) return;
+    // 콜백이 스트림 잠금을 쥔 채 lock을 잡으므로 스트림 함수는 lock 밖에서 부른다.
+    if (free_v->rate != e->rate) {
+        SDL_AudioSpec spec = {SDL_AUDIO_S16, 1, (int)e->rate};
+        SDL_SetAudioStreamFormat(free_v->st, &spec, NULL);
+    }
+    SDL_LockMutex(lock);
+    SDL_AudioStream *st = free_v->st;
+    *free_v = (wave_t){true, repeat, (const int16_t *)e->data, e->len, 0, e->rate, 0, handle, ++order, st};
+    SDL_UnlockMutex(lock);
+}
+
+// 최종 믹스. 효과음이 많이 겹쳐 1을 넘으면 버퍼 단위로 게인을 천천히 내려 파형을 자르지 않는다. 일시 정지 전후의 페이드도 여기서 한다.
+#define MASTER_FADE_S 0.012f
+#define LIMIT_RELEASE_S 0.2f
+static SDL_AtomicInt master_on;
+static void SDLCALL postmix(void *ud, const SDL_AudioSpec *spec, float *buf, int buflen) {
+    static float limit = 1, master = 0;
+    (void)ud;
+    int ch = spec->channels, frames = buflen / (int)sizeof(float) / ch;
+    if (frames <= 0) return;
+    float peak = 0;
+    for (int i = 0; i < frames * ch; i++) {
+        float a = buf[i] < 0 ? -buf[i] : buf[i];
+        if (a > peak) peak = a;
+    }
+    if (peak > audio_peak) audio_peak = peak;
+    float target = peak > 0.98f ? 0.98f / peak : 1;
+    float rise = limit + frames / (spec->freq * LIMIT_RELEASE_S);
+    if (target > rise) target = rise;
+    float limit_step = (target - limit) / frames;
+    float master_step = 1 / (spec->freq * MASTER_FADE_S);
+    float master_to = SDL_GetAtomicInt(&master_on) ? 1.0f : 0.0f;
+    for (int f = 0; f < frames; f++) {
+        limit += limit_step;
+        if (master < master_to) { master += master_step; if (master > 1) master = 1; }
+        else if (master > master_to) { master -= master_step; if (master < 0) master = 0; }
+        float g = limit * master;
+        for (int c = 0; c < ch; c++) {
+            float v = buf[f * ch + c] * g;
+            buf[f * ch + c] = v > 1 ? 1 : v < -1 ? -1 : v;
+        }
+    }
+}
+
+// 장치를 바로 멈추면 파형이 끊겨 소리가 튄다. 줄인 뒤에 멈춘다.
+static Uint32 SDLCALL pause_later(void *ud, SDL_TimerID id, Uint32 interval) {
+    (void)ud; (void)id; (void)interval;
+    if (!SDL_GetAtomicInt(&master_on)) SDL_PauseAudioDevice(device);
+    return 0;
+}
+
 void audio_pause(bool paused) {
-    if (!stream) return;
-    if (paused) SDL_PauseAudioStreamDevice(stream); else SDL_ResumeAudioStreamDevice(stream);
+    if (!device) return;
+    SDL_SetAtomicInt(&master_on, !paused);
+    if (paused) SDL_AddTimer(30, pause_later, NULL);
+    else SDL_ResumeAudioDevice(device);
 }
 
 void audio_init(const char *soundfont) {
@@ -177,9 +276,25 @@ void audio_init(const char *soundfont) {
     }
     lock = SDL_CreateMutex();
     SDL_AudioSpec spec = {SDL_AUDIO_F32, 2, RATE};
-    stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, audio_cb, NULL);
-    if (stream) SDL_ResumeAudioStreamDevice(stream);
-    else fprintf(stderr, "오디오 장치 실패: %s\n", SDL_GetError());
+    device = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec);
+    if (!device) { fprintf(stderr, "오디오 장치 실패: %s\n", SDL_GetError()); return; }
+    SDL_SetAtomicInt(&master_on, 1);
+    SDL_SetAudioPostmixCallback(device, postmix, NULL);
+    stream = SDL_CreateAudioStream(&spec, NULL);
+    if (stream) {
+        SDL_SetAudioStreamGetCallback(stream, audio_cb, NULL);
+        SDL_BindAudioStream(device, stream);
+    }
+    SDL_AudioSpec wave_spec = {SDL_AUDIO_S16, 1, 8000};
+    for (int w = 0; w < WAVE_STREAMS; w++) {
+        wave_t *v = &waves[w];
+        v->rate = 8000;
+        v->st = SDL_CreateAudioStream(&wave_spec, NULL);
+        if (!v->st) continue;
+        SDL_SetAudioStreamGain(v->st, 0.5f); // 여러 개가 겹쳐도 넘치지 않도록 절반으로 섞는다.
+        SDL_SetAudioStreamGetCallback(v->st, wave_cb, v);
+        SDL_BindAudioStream(device, v->st);
+    }
 }
 
 uint32_t audio_load(const uint8_t *data, uint32_t size) {
@@ -198,45 +313,44 @@ uint32_t audio_load(const uint8_t *data, uint32_t size) {
 void audio_stop(uint32_t handle) {
     if (!handle || !lock) return;
     SDL_LockMutex(lock);
-    // 반복 효과음은 정지 호출 말고는 끝날 방법이 없으므로 바로 끈다.
-    for (int i = 0; i < 16; i++) if (plays[i].on && plays[i].repeat && plays[i].s->has_wave && plays[i].handle == handle) {
-        plays[i].on = false;
-        for (int w = 0; w < 16; w++) if (waves[w].on && waves[w].handle == handle) waves[w].on = false;
-    }
+    // 반복 효과음은 정지 호출 말고는 끝날 방법이 없으므로 끈다. 한 번 내는 효과음은 끝까지 울린다.
+    for (int w = 0; w < WAVE_STREAMS; w++)
+        if (waves[w].on && waves[w].repeat && waves[w].handle == handle && !waves[w].fade) waves[w].fade = WAVE_FADE_OUT;
     play_t *m = music_play();
-    if (m && m->handle == handle) {
-        if (!music_stop_at) music_stop_at = SDL_GetTicks() + MUSIC_STOP_WAIT_MS;
-    } else if (handle == interrupting_sfx) {
-        // 효과음은 끝까지 울린다. 이 뒤로 소리 요청이 한동안 없으면 실제 정지다.
-        music_stop_at = SDL_GetTicks() + MUSIC_SFX_QUIET_MS;
-    }
+    if (m && m->handle == handle && !sfx_scope) music_stop_now();
     SDL_UnlockMutex(lock);
 }
 
 void audio_play(uint32_t handle, bool repeat) {
     if (!handle || handle > nhandles) return;
     seq_t *seq = handles[handle - 1];
+    if (seq->has_wave) {
+        for (uint32_t i = 0; i < seq->n; i++)
+            if (seq->ev[i].kind != 0) wave_start(&seq->ev[i], handle, repeat);
+        return;
+    }
     SDL_LockMutex(lock);
     play_t *m = music_play();
-    if (seq->has_wave) {
-        if (m && music_stop_at) {
-            music_stop_at = SDL_GetTicks() + MUSIC_SFX_QUIET_MS;
-            interrupting_sfx = handle;
-        }
-    } else if (m && m->s == seq) {
-        // 같은 곡이면 처음으로 돌리지 않고 핸들만 넘긴다.
+    if (m && m->s == seq) {
+        // 효과음이 끝나 같은 곡을 다시 부르면 처음으로 돌리지 않고 핸들만 넘긴다.
         m->handle = handle;
         m->repeat = repeat;
-        music_clear_stop();
-        SDL_UnlockMutex(lock);
-        return;
     } else {
         music_stop_now();
+        for (int i = 0; i < 16; i++) if (!plays[i].on) {
+            plays[i] = (play_t){true, repeat, seq, 0, 0, handle};
+            break;
+        }
     }
-    for (int i = 0; i < 16; i++) if (!plays[i].on) {
-        plays[i] = (play_t){true, repeat, seq, 0, 0, handle};
-        break;
-    }
+    SDL_UnlockMutex(lock);
+}
+
+void audio_sfx_scope(bool in_sfx) { sfx_scope = in_sfx; }
+
+void audio_music_stop(void) {
+    if (!lock) return;
+    SDL_LockMutex(lock);
+    music_stop_now();
     SDL_UnlockMutex(lock);
 }
 

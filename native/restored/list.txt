@@ -29,3 +29,7 @@
 44284 hud.c wrap
 1bde0 dialog.c wrap
 19e30 dialog.c wrap
+7d3a0 sound.c wrap
+7d564 sound.c wrap
+74200 sound.c wrap
+47aa0 sound.c wrap
