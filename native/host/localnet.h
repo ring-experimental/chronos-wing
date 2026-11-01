@@ -105,6 +105,17 @@ void ln_upload_set(const uint8_t *body, size_t n);
 // 동료 슬롯(0~9)의 합류 여부. 4.1 본문 오프셋 53부터 슬롯마다 10바이트다.
 bool ln_upload_joined(int slot);
 
+// 휴면과 보호쉴드(localnet_sleep.c). 끝나는 시각은 net/sleep에 둔다.
+// 프로필의 휴면 상태와 남은 분을 현재 시각으로 맞춘다. ln_write_profile이 부른다.
+void ln_sleep_tick(void);
+bool ln_is_sleeping(void);
+// 휴면이나 보호쉴드 중이면 다른 유저의 공격을 받지 않는다.
+bool ln_is_protected(void);
+// 보호쉴드 구매 등: 남은 시간에 더한다.
+void ln_shield_add(int minutes);
+// SMS 알리미 구매: 남은 알림 건수에 더한다.
+void ln_sms_add(int count);
+
 // 기능별 처리기. 처리했으면 true, 모르는 소분류면 false.
 bool ln_session(ln_req *q); // 대분류 10
 bool ln_mail(ln_req *q);    // 대분류 1, 소분류 1~11
