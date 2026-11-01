@@ -9,7 +9,7 @@
 #include <vector>
 
 extern "C" void host_key(int type, int code);
-extern "C" bool game_in_dialog(void);
+extern "C" bool game_in_story_dialog(void);
 
 namespace {
 
@@ -313,7 +313,7 @@ extern "C" bool ui_event(const SDL_Event *e) {
 extern "C" void ui_render(void) {
     if (!ctx) return;
     update_sizes();
-    bool dialog = game_in_dialog();
+    bool dialog = game_in_story_dialog();
     if (dialog != model.dialog) {
         if (dialog) ui_release_all();
         model.dialog = dialog;

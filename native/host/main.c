@@ -23,7 +23,8 @@ static int width_arg;
 void request_exit(void) { running = false; }
 
 // 대사가 진행되는 동안 1인 게임 내부 값이다. 컷신과 필드 대사 모두 해당한다(장면별 메모리 비교로 찾음).
-bool game_in_dialog(void) { return cpu.m && cpu.m[0x1a2940]; }
+// 0x1a2940은 NPC 대화와 선택지에서도 1이다. 0x1a2cb1은 스토리 장면에서만 1이다.
+bool game_in_story_dialog(void) { return cpu.m && cpu.m[0x1a2940] && cpu.m[0x1a2cb1]; }
 
 // 높이 320을 유지하고 폭은 모니터 비율을 따른다(240~640). 창 모드 기본값은 원작 폭이다.
 static int choose_width(bool windowed) {

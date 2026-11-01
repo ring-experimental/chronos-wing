@@ -2,7 +2,7 @@
 <head><link type="text/rcss" href="ui.rcss"/><title>pad</title></head>
 <body data-model="ui">
 <div id="root" data-if="pad_on || edit" data-style-opacity="edit ? 0.9 : alpha / 100">
-  <!-- g[번호]는 host/ui.cpp의 groups 순서다. 대사 중에는 OK와 스킵만 남는다. 키는 게임 도움말의 기본 조작을 따른다. -->
+  <!-- g[번호]는 host/ui.cpp의 groups 순서다. 스토리 대사 중에는 OK와 스킵만 남는다. NPC 대화에서는 선택지와 메뉴를 다뤄야 하므로 전부 보인다. 키는 게임 도움말의 기본 조작을 따른다. -->
   <div id="dpad" class="group" style="width:3em;height:3em;" data-if="edit || !dialog" data-style-left="g[0].left" data-style-top="g[0].top" data-style-font-size="g[0].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 0">
     <div class="dial"></div>
     <div class="btn arrow up" code="-1" style="left:1em;top:0.05em;"></div>

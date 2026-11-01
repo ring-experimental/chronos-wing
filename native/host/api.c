@@ -250,10 +250,41 @@ static void api_media(cpu_t *c, uint32_t i) {
     }
 }
 
+enum {
+    CASH_SCENE = 0x2100b8,
+    NET_REQUEST = 0x210035,
+    NET_RESULT = 0x210036,
+    HERO_PTR = 0x19c8d4 + 0xbd8,
+    HERO_SHORTCUTS_BOUGHT = 600,
+    FN_NET_CLOSE = 0x156038,
+    FN_NET_MODE_SET = 0x1582f8,
+    FN_HIDE_CONNECTING = 0x157944,
+    FN_CLOSE_POPUP = 0x157e0c,
+    FN_SAVE_CASH = 0x143c58,
+    FN_CLOSE_SCENE = 0x15b4d4,
+};
+
 static void api_net(cpu_t *c, uint32_t i) {
     uint32_t *r = c->r;
     switch (i) {
-    case 0: defer_call(r[0], (uint32_t)-1, r[1], 1); r[0] = 0; break; // 서버가 없으므로 실패를 돌려준다.
+    case 0:
+        // 서버가 없으므로 실패를 돌려준다. 키냥냥의 스킬 단축키 구매만 성공으로 처리한다. 원본이 성공 응답 때 하는 일(0x15ab3c)과 같다.
+        if (R8(CASH_SCENE + 5) == 0x13 && R8(CASH_SCENE + 0x2b) == 3) {
+            W8(R32(HERO_PTR) + HERO_SHORTCUTS_BOUGHT, 1);
+            static const uint32_t done[] = {FN_NET_CLOSE, FN_NET_MODE_SET, FN_HIDE_CONNECTING, FN_CLOSE_POPUP, FN_SAVE_CASH, FN_CLOSE_SCENE};
+            for (int k = 0; k < 6; k++) defer_call(done[k] | 1, 0, 0, 1);
+            r[0] = 0;
+            break;
+        }
+        // 상인의 캐시구입도 결과만 성공으로 넣는다. 지급은 게임 코드(0x16a320)가 한다.
+        if (R8(CASH_SCENE + 5) == 4 && R8(NET_REQUEST) == 4) {
+            W8(NET_RESULT, 1);
+            static const uint32_t close[] = {FN_NET_CLOSE, FN_NET_MODE_SET, FN_HIDE_CONNECTING, FN_CLOSE_POPUP};
+            for (int k = 0; k < 4; k++) defer_call(close[k] | 1, 0, 0, 1);
+            r[0] = 0;
+            break;
+        }
+        defer_call(r[0], (uint32_t)-1, r[1], 1); r[0] = 0; break;
     case 1: r[0] = 0; break;
     default: r[0] = (uint32_t)-1;
     }
