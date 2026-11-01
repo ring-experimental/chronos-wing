@@ -4,3 +4,17 @@
 805f8 worldmap.c
 457d8 charmenu.c wrap
 45c34 charmenu.c wrap
+453bc devmode.c wrap
+454f4 devmode.c wrap
+45690 devmode.c wrap
+45a88 devmode.c wrap
+4609c devmode.c wrap
+45b5c devmode.c
+3eac devmode.c wrap
+41bc devmode.c wrap
+3ebc devmode.c wrap
+2eca0 devmode.c wrap
+2edac devmode.c wrap
+2ed70 devmode.c wrap
+4ab54 devmode.c wrap
+4ad54 devmode.c wrap
