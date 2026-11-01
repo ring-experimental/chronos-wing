@@ -155,6 +155,7 @@ static void write_shot(const char *path) {
 
 static void send_key(int type, int code) {
     if (dialog_log_key(type, code)) return;
+    if (replay_key(type, code)) return;
     uint32_t a[3] = {(uint32_t)type, (uint32_t)code, 0};
     guest_call(FN_INPUT, a, 3);
 }
@@ -418,6 +419,7 @@ int main(int argc, char **argv) {
         bool frozen = dialog_log_is_open();
         if (!paused && !frozen) {
             dialog_auto_tick();
+            replay_tick();
             timers_run();
         }
         if (frame_dirty || paused || frozen) render_frame();

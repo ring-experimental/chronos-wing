@@ -153,6 +153,13 @@ static void api_kernel(cpu_t *c, uint32_t i) {
 
 // 저장 파일. 핸들은 작은 양수다.
 static struct { FILE *f; int mode; } files[64];
+bool host_save_sandbox;
+
+#ifdef _WIN32
+#define NULL_DEVICE "NUL"
+#else
+#define NULL_DEVICE "/dev/null"
+#endif
 
 static bool save_path(char *out, size_t cap, const char *name) {
     if (!*name || strstr(name, "..") || strlen(name) >= 128) return false;
@@ -177,7 +184,8 @@ static void api_fs(cpu_t *c, uint32_t i) {
         bool exists = stat(path, &st) == 0;
         if (!exists && mode == 1) { r[0] = (uint32_t)-12; break; }
         const char *m = mode == 1 ? "rb" : (mode == 4 || !exists) ? "w+b" : "r+b";
-        FILE *f = fopen(path, m);
+        // 스토리 다시보기 중에는 쓰기로 연 파일을 버리는 곳으로 보낸다. 저장 파일은 열지도 않아 강제 종료해도 깨지지 않는다.
+        FILE *f = host_save_sandbox && mode != 1 ? fopen(NULL_DEVICE, "r+b") : fopen(path, m);
         if (!f) { r[0] = (uint32_t)-1; break; }
         int slot = 0;
         while (slot < 64 && files[slot].f) slot++;
@@ -215,7 +223,7 @@ static void api_fs(cpu_t *c, uint32_t i) {
     }
     case 6:
         if (!save_path(path, sizeof path, gstr(r[0]))) { r[0] = (uint32_t)-3; break; }
-        r[0] = remove(path) ? (uint32_t)-12 : 0;
+        r[0] = host_save_sandbox ? 0 : remove(path) ? (uint32_t)-12 : 0;
         break;
     case 15: r[0] = (uint32_t)ftell(files[fd].f); break;
     case 16: {

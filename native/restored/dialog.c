@@ -8,6 +8,8 @@ void orig_f_1bde0(cpu_t *c);
 void orig_f_19e30(cpu_t *c);
 bool game_in_dialog(void);
 void host_key(int type, int code);
+void replay_note_talk(void);
+void replay_script_ended(void);
 uint32_t gfx_screen_handle(void);
 
 #define T_TITLE "\xb4\xeb\xbb\xe7\x20\xb1\xe2\xb7\xcf" // 대사 기록
@@ -122,6 +124,7 @@ static void add_text(uint32_t text, int len) {
 void f_1bde0(cpu_t *c) {
     uint32_t index = c->r[1] & 0xff, narration = c->r[2] & 0xff;
     orig_f_1bde0(c);
+    replay_note_talk();
     if (story_ended && !R8(SCRIPT_CONTINUES)) line_count = 0;
     story_ended = false;
     uint32_t slot = SCRIPT + index * SLOT_SIZE, handle = R32(slot + SLOT_TEXT), name = R32(slot + SLOT_NAME);
@@ -137,6 +140,7 @@ void f_1bde0(cpu_t *c) {
 void f_19e30(cpu_t *c) {
     orig_f_19e30(c);
     story_ended = true;
+    replay_script_ended();
 }
 
 // 글이 다 나왔고 OK를 기다리는 중이면 그 쪽 글 길이를 돌려준다. 아니면 -1이다.

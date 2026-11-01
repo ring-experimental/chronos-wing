@@ -217,8 +217,15 @@ static int menu_state(void) {
     return (int8_t)R8(got(GOT_MENU_STATE));
 }
 
+bool replay_take_return(void);
+
 void f_453bc(cpu_t *c) {
     int8_t next = (int8_t)c->r[0];
+    // 스토리 다시보기가 끝나 메뉴로 돌아오면 목록을 다시 연다.
+    if ((next == 9 || next == 11) && replay_take_return()) {
+        next = ITEM_REPLAY;
+        W8(got(GOT_MENU_ITEM), ITEM_REPLAY);
+    }
     active = next == ITEM_MUSIC ? &music_panel : next == ITEM_REPLAY ? &replay_panel : NULL;
     if (active) c->r[0] = STATE_DEV;
     orig_f_453bc(c);

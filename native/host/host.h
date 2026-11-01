@@ -54,6 +54,10 @@ uint64_t now_ms(void);
 
 // 표시
 void video_present(uint32_t fb_handle);
+// restored/replay.c
+void replay_tick(void);
+bool replay_key(int type, int code);
+extern bool host_save_sandbox; // 참이면 게임의 저장 파일 쓰기를 버린다(api.c).
 // restored/dialog.c
 bool dialog_auto(void);
 void dialog_set_auto(bool on);
