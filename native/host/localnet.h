@@ -76,28 +76,57 @@ void ln_fame_add(int32_t delta);
 // 응답 본문에 0x155070 형식으로 프로필을 쓴다.
 void ln_write_profile(void);
 
-// 방어 부대 동료. 0x155210이 표 0x1a9e58(0x74바이트 단위)을 앞에서부터 덮어쓰는 값이다.
-enum { LN_MEMBER_MAX = 8 };
+// 방어 유닛(동료, 용병). 응답 0x155210, 0x152040이 표 0x1a9e58, 0x1aa318(0x74바이트 단위)에 풀어 넣는 값이다. 괄호는 그 오프셋.
+// 수치 근거와 정한 값은 work/net-offline.md의 용병과 방어진 절.
+enum { LN_MEMBER_MAX = 8, LN_MERC_MAX = 26, LN_DEFENSE_MAX = 15 };
 typedef struct {
-    int64_t uid;           // +0x68 양수면 일반 배치 비용(0xf3c). 음수 작은 값은 용병 종류 구간이다(0x164b70).
-    int16_t id;            // +0x48 /DAT/SL의 값. 요청 10.10이 실어 온다.
+    int64_t uid;           // +0x68 동료는 슬롯+1. 용병은 -id(-0xf8~-0x103 보스 비용 0xf3a, 그 밖의 음수 일반 0xf3b, 양수 동료 0xf3c. 0x162dcc)
+    int16_t id;            // +0x48 EMD/M 번호. 동료는 /DAT/SL, 용병은 /DAT/ML의 값
     int8_t level;          // +0x35
     char name[27];         // +0x4 1바이트 길이 + 내용으로 나간다
-    int16_t floor, room, slot; // +0x4e, +0x50, +0x52 배치 위치. 셋 다 0 이상일 때만 배치된 것(0x164b70). 없으면 -1
-    uint8_t fatigue;       // +0x4a 피로도 0~100. 100이면 회색
+    int16_t floor, room, slot; // +0x4e 함선 층, +0x50, +0x52 칸 좌표. 셋 다 0 이상일 때만 배치된 것(0x164b70). 없으면 -1
+    uint8_t fatigue;       // +0x4a 피로도 0~100. 100이면 회색, 전투불능(0x162c86)
+    int16_t recover_cost;  // +0x4c 피로회복 NP(0x1634c2)
     int32_t hp;            // +0x24
-    int32_t attack;        // +0x5c 목록의 첫 값
+    int32_t attack;        // +0x5c 첫 공격력. 화면에는 이것만 나온다
+    int32_t attack_more[2]; // +0x60, +0x64 다음 공격들
+    uint8_t attack_count;  // +0x5a 1~3
     int16_t pdef, mdef;    // +0x30 물리방어, +0x32 마도방어
     int8_t crit;           // +0x34 치명타 %
+    uint8_t grade;         // +0x59 전투 때 적 +0x178이 된다(0x174944). EMD/M 값
+    uint8_t joined;        // 동료만. 0이면 피로도 100으로 보내 배치를 막는다
+    int64_t expire;        // 용병 계약 끝 시각(유닉스 초). 동료는 0
+    // 장비 보정. 창고 3.8이 채우면 수치 계산에 더해진다(ln_unit_stats).
+    int32_t bonus_hp, bonus_attack;
+    int16_t bonus_pdef, bonus_mdef;
+    int8_t bonus_crit;
 } ln_member;
 
-// 동료 목록. n에 개수를 돌려준다. 바꾼 뒤에는 ln_members_save를 부른다.
+// 동료 목록. 항상 슬롯 순서 8칸이다(0x12b368, 0x16328c가 개수와 상관없이 8칸을 쓴다). 바꾼 뒤에는 ln_members_save를 부른다.
 ln_member *ln_members(int *n);
 void ln_members_save(void);
+// 용병 목록(net/mercs). 바꾼 뒤에는 ln_mercs_save를 부른다.
+ln_member *ln_mercs(int *n);
+void ln_mercs_save(void);
+// uid로 동료나 용병을 찾는다. 없으면 NULL.
+ln_member *ln_unit_find(int64_t uid);
+// 응답 본문에 유닛 한 개를 쓴다. 0x155210, 0x152040, 0x155398, 0x1542a4(3.8)의 항목 형식이 모두 같다.
+void ln_write_unit(const ln_member *m);
 // 응답 본문에 0x155210 형식으로 쓴다(be16 개수 + 항목).
 void ln_write_members(void);
 // 요청 10.10의 (id, 레벨) 8쌍과 마지막 4.1의 합류 여부로 목록을 맞춘다. 배치와 피로도는 uid(슬롯+1)로 이어받는다.
 void ln_members_sync(const int16_t *ids, const int8_t *levels, int n);
+// id, level, 장비 보정으로 수치를 다시 계산한다. EMD/M, EMD/C3의 비율과 기준 곡선을 쓴다(localnet_staff.c).
+void ln_unit_stats(ln_member *m);
+
+// 방어진: 지금 전투에 나오는 유닛(배치됨, 피로도 100 아님, 계약 안 끝남). 공략 기능이 내 함선 공략, 모의전투, 그림자 전장에 쓴다.
+// 층별 칸 좌표는 floor, room, slot이고 0x174944가 id로 EMD/M 적을 만든 뒤 수치를 덮어쓴다.
+// out에 포인터를 채우고 개수를 돌려준다. cap은 LN_DEFENSE_MAX면 충분하다.
+int ln_defense(const ln_member **out, int cap);
+// 응답 본문에 0x155398 형식으로 방어진을 쓴다(u8 개수 + 항목). 표 NS+0x6f0, 0x768이 15칸이라 넘지 않는다.
+void ln_write_defense(void);
+// 전투 뒤 피로도를 더한다(0~100). uid가 없으면 false. 저장까지 한다.
+bool ln_unit_fatigue_add(int64_t uid, int delta);
 
 // 마지막 4.1 요청 본문(net/upload). 없으면 NULL. 형식은 work/net-offline.md의 세션 절.
 const uint8_t *ln_upload(size_t *n);
