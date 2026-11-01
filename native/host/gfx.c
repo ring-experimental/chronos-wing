@@ -164,7 +164,12 @@ void gfx_api(cpu_t *c, uint32_t i) {
     }
     case 15: { fb_t b = fb_get(r[0]); draw_arc(&b, (int)r[1], (int)r[2], (int)r[3], (int)arg(c, 4), (int)arg(c, 5), (int)arg(c, 6), fg(arg(c, 7))); break; }
     case 16: { fb_t b = fb_get(r[0]); fill_arc(&b, (int)r[1], (int)r[2], (int)r[3], (int)arg(c, 4), (int)arg(c, 5), (int)arg(c, 6), fg(arg(c, 7))); break; }
-    case 17: fprintf(stderr, "MC_grpDrawString은 아직 없음: %s\n", gstr(r[3])); break;
+    case 17: { // DrawString(fb,x,y,str,len,gc). TextComponent(0x10796c)만 쓴다. 글꼴은 게임 것이므로 게임 함수로 그린다. 색은 호출자가 이미 정했다.
+        enum { FN_DRAW_TEXT = 0x12c1ec, TEXT_MAX = 100, BASELINE = 13 };
+        uint32_t a[6] = {r[0], r[1], r[2] - BASELINE, r[3], TEXT_MAX, 0}; // DrawString의 y는 글자 아래선, 게임 함수는 위선이다.
+        guest_call(FN_DRAW_TEXT | 1, a, 6);
+        break;
+    }
     case 21: video_present(r[1]); break;
     case 22: r[0] = ((r[0] & 0xff) >> 3) << 11 | ((r[1] & 0xff) >> 2) << 5 | (r[2] & 0xff) >> 3; break;
     case 23: { // GetRgbFromPixel(pixel,&r,&g,&b)

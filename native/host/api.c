@@ -304,7 +304,9 @@ void api_dispatch(cpu_t *c, uint32_t t, uint32_t i) {
     case 7: api_fs(c, i); break;
     case 10: api_media(c, i); break;
     case 11: api_net(c, i); break;
-    case 2: case 4: case 9: r[0] = 0; break; // backlight, 입력기, UIC: 게임 화면에 쓰이지 않는다.
+    case 2: r[0] = 0; break; // backlight
+    case 4: ime_api(c, i); break;
+    case 9: uic_api(c, i); break;
     default: fprintf(stderr, "표 %u API %u 미구현\n", t, i); r[0] = 0;
     }
     c->SP = sp;

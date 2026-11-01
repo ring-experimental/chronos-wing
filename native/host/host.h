@@ -24,6 +24,8 @@ static inline char *gstr(uint32_t a) { return (char *)cpu.m + a; }
 typedef void (*api_fn)(cpu_t *c);
 void api_dispatch(cpu_t *c, uint32_t table, uint32_t index);
 void api_install(void);
+void ime_api(cpu_t *c, uint32_t i); // 표 4, ime.c
+void uic_api(cpu_t *c, uint32_t i); // 표 9, ime.c
 
 // 메모리
 extern uint32_t host_last_call;

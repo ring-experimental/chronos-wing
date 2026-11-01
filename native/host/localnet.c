@@ -16,7 +16,7 @@ enum { SOCKET_FD = 1, E_WOULD_BLOCK = -0x13, PACKET_MAX = 0x800, HEADER = 12 };
 static uint8_t in[PACKET_MAX * 4], out[PACKET_MAX * 64], building[PACKET_MAX];
 static size_t in_len, out_len, out_pos, building_len;
 static uint32_t read_cb, read_param;
-static bool socket_open, net_log, net_log_read;
+static bool socket_open, peer_closed, net_log, net_log_read;
 
 #define LOG(...) do { if (net_log) fprintf(stderr, "[net] " __VA_ARGS__); } while (0)
 
@@ -34,6 +34,7 @@ void ln_w8(uint8_t v) {
 }
 void ln_w16(uint16_t v) { ln_w8((uint8_t)(v >> 8)); ln_w8((uint8_t)v); }
 void ln_w32(uint32_t v) { ln_w16((uint16_t)(v >> 16)); ln_w16((uint16_t)v); }
+void ln_w64(uint64_t v) { ln_w32((uint32_t)(v >> 32)); ln_w32((uint32_t)v); }
 void ln_wbytes(const void *p, size_t n) { const uint8_t *s = p; while (n--) ln_w8(*s++); }
 void ln_wstr16(const char *s) { size_t n = strlen(s); ln_w16((uint16_t)n); ln_wbytes(s, n); }
 
@@ -48,7 +49,7 @@ void ln_begin(int major, int minor, int result) {
 
 // 큐를 비운 직후 콜백을 예약한다. 게임은 읽기 실패(E_WOULD_BLOCK) 뒤 콜백을 걸고 기다린다.
 static void wake_reader(void) {
-    if (read_cb && out_pos < out_len) {
+    if (read_cb && (out_pos < out_len || peer_closed)) {
         uint32_t cb = read_cb;
         read_cb = 0;
         defer_call(cb, SOCKET_FD, 0, 1);
@@ -132,7 +133,16 @@ static void packets_run(void) {
         if (in_len - pos < n) break;
         ln_req q = {h[4] << 8 | h[5], (int)((uint32_t)h[6] << 24 | h[7] << 16 | h[8] << 8 | h[9]), h[11], h + HEADER, h + n};
         LOG("요청 %d,%d %u바이트\n", q.major, q.minor, n);
-        if (!route(&q)) fprintf(stderr, "[net] 처리기 없는 요청 %d,%d\n", q.major, q.minor);
+        if (net_log) {
+            for (uint32_t k = HEADER; k < n; k++) fprintf(stderr, "%02x", h[k]);
+            if (n > HEADER) fputc('\n', stderr);
+        }
+        if (!route(&q)) {
+            // 응답이 없으면 게임은 데이터 요청중에서 영원히 기다린다. 서버가 끊은 것으로 알려 끊김 처리(0x156308 -> 0x157b1c)로 보낸다.
+            fprintf(stderr, "[net] 처리기 없는 요청 %d,%d, 연결을 끊는다\n", q.major, q.minor);
+            peer_closed = true;
+            wake_reader();
+        }
         pos += n;
     }
     memmove(in, in + pos, in_len - pos);
@@ -151,6 +161,7 @@ void localnet_api(uint32_t slot) {
     case 1: r[0] = 0; break;
     case 2:
         socket_open = true;
+        peer_closed = false;
         in_len = out_len = out_pos = 0;
         read_cb = 0;
         r[0] = SOCKET_FD;
@@ -176,7 +187,7 @@ void localnet_api(uint32_t slot) {
     case 32: { // Read(fd, buf, len)
         if (!socket_open) { r[0] = (uint32_t)-1; break; }
         size_t n = out_len - out_pos;
-        if (!n) { r[0] = (uint32_t)E_WOULD_BLOCK; break; }
+        if (!n) { r[0] = peer_closed ? (uint32_t)-1 : (uint32_t)E_WOULD_BLOCK; break; }
         if (n > r[2]) n = r[2];
         CK(r[1], (uint32_t)n);
         memcpy(c->m + r[1], out + out_pos, n);
