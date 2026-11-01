@@ -29,3 +29,5 @@
 44284 hud.c wrap
 1bde0 dialog.c wrap
 19e30 dialog.c wrap
+74188 music.c wrap
+7d3ec music.c wrap

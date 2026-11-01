@@ -119,6 +119,16 @@ static void music_stop_now(void) {
     music_clear_stop();
 }
 
+// 플레이리스트 재생. 재생 중인 동안 게임의 배경음 요청은 무시하고 효과음만 받는다.
+// 핸들은 플레이리스트가 따로 불러 게임의 정지 호출과 겹치지 않는다.
+static bool solo;
+
+// 곡을 바꿀 때 앞 곡의 잔향까지 바로 끊는다.
+static void solo_cut(void) {
+    music_stop_now();
+    if (synth) for (int ch = 0; ch < 16; ch++) tsf_channel_sounds_off_all(synth, ch);
+}
+
 static void music_check_stop(void) {
     if (music_stop_at && SDL_GetTicks() >= music_stop_at) music_stop_now();
 }
@@ -223,6 +233,9 @@ void audio_play(uint32_t handle, bool repeat) {
             music_stop_at = SDL_GetTicks() + MUSIC_SFX_QUIET_MS;
             interrupting_sfx = handle;
         }
+    } else if (solo) {
+        SDL_UnlockMutex(lock);
+        return;
     } else if (m && m->s == seq) {
         // 같은 곡이면 처음으로 돌리지 않고 핸들만 넘긴다.
         m->handle = handle;
@@ -241,3 +254,40 @@ void audio_play(uint32_t handle, bool repeat) {
 }
 
 void audio_free(uint32_t handle) { audio_stop(handle); }
+
+void audio_solo_play(uint32_t handle) {
+    if (!handle || handle > nhandles || !lock) return;
+    SDL_LockMutex(lock);
+    solo = true;
+    solo_cut();
+    for (int i = 0; i < 16; i++) if (!plays[i].on) {
+        plays[i] = (play_t){true, false, handles[handle - 1], 0, 0, handle};
+        break;
+    }
+    SDL_UnlockMutex(lock);
+}
+
+void audio_solo_stop(void) {
+    if (!lock) return;
+    SDL_LockMutex(lock);
+    if (solo) solo_cut();
+    SDL_UnlockMutex(lock);
+}
+
+void audio_solo_end(void) {
+    if (!lock) return;
+    SDL_LockMutex(lock);
+    if (solo) solo_cut();
+    solo = false;
+    SDL_UnlockMutex(lock);
+}
+
+bool audio_solo_active(void) { return solo; }
+
+bool audio_solo_playing(void) {
+    if (!lock) return false;
+    SDL_LockMutex(lock);
+    bool on = solo && music_play();
+    SDL_UnlockMutex(lock);
+    return on;
+}

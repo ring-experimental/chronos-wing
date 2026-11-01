@@ -82,6 +82,11 @@ uint32_t audio_load(const uint8_t *data, uint32_t size);
 void audio_play(uint32_t handle, bool repeat);
 void audio_stop(uint32_t handle);
 void audio_free(uint32_t handle);
+void audio_solo_play(uint32_t handle); // 게임 배경음을 끊고 이 곡을 한 번 튼다. audio_solo_end까지 게임 배경음은 무시한다.
+void audio_solo_stop(void);            // 곡만 끊는다. 게임 배경음은 계속 무시한다.
+void audio_solo_end(void);
+bool audio_solo_active(void);
+bool audio_solo_playing(void);
 
 // 그래픽 API (표 3)
 void gfx_api(cpu_t *c, uint32_t index);
