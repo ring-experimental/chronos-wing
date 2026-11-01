@@ -33,3 +33,11 @@
 7d564 sound.c wrap
 74200 sound.c wrap
 47aa0 sound.c wrap
+19ce4 replay.c wrap
+19cac replay.c wrap
+19a28 replay.c wrap
+1a054 replay.c wrap
+1b4f8 replay.c wrap
+1eac4 replay.c wrap
+577fc replay.c wrap
+1a2dc replay.c wrap
