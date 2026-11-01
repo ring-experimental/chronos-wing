@@ -15,24 +15,31 @@ extern "C" bool game_shortcuts_bought(void);
 
 namespace {
 
+constexpr float UNPLACED = -1.f; // 옮기기 전의 스킬 슬롯. L 버튼 왼쪽에 줄지어 놓인다.
+
 // 패드 묶음. 위치는 화면 비율, 크기는 em이다. 문서는 g[번호]로 묶으므로 ui/pad.rml과 순서를 맞춘다.
 struct Group {
     const char *id;
     float def_x, def_y, w_em, h_em;
     float x, y, scale;
+    float center_x, center_y; // 지금 화면에 놓인 중심(비율).
     Rml::String left, top, font;
 };
 Group groups[] = {
     {"dpad", 0.14f, 0.73f, 3.f, 3.f},
     {"ok", 0.91f, 0.80f, 1.6f, 1.6f},
     {"skill", 0.80f, 0.74f, 1.55f, 2.75f},
-    {"aux", 0.95f, 0.06f, 5.2f, 0.8f},
+    {"aux", 0.95f, 0.06f, 2.65f, 0.8f},
     {"sys", 0.04f, 0.06f, 0.8f, 0.8f},
     {"skip", 0.91f, 0.60f, 1.6f, 0.8f},
     {"item", 0.91f, 0.60f, 1.f, 1.f},
     {"menu", 0.91f, 0.48f, 0.8f, 0.8f},
+    {"slot1", UNPLACED, UNPLACED, 0.8f, 0.8f},
+    {"slot3", UNPLACED, UNPLACED, 0.8f, 0.8f},
+    {"slot0", UNPLACED, UNPLACED, 0.8f, 0.8f},
 };
-constexpr int SYS_GROUP = 4;
+constexpr int SYS_GROUP = 4, AUX_GROUP = 3, FIRST_SLOT = 8, SLOT_COUNT = 3;
+constexpr float SLOT_PITCH_EM = 0.85f;
 constexpr float BASE_DP = 34.f;
 constexpr float HUD_TOP_RATIO = 35.f / 320.f; // 상단 상태창 높이. 왼쪽 위 설정 버튼을 그만큼 내린다.
 bool hud_top = false;
@@ -79,7 +86,7 @@ void load_config(bool default_pad) {
         if (n == 2 && !strcmp(name, "pad")) model.pad_on = a != 0;
         else if (n == 2 && !strcmp(name, "size")) model.size = (int)std::clamp(a, 50.f, 200.f);
         else if (n == 2 && !strcmp(name, "opacity")) model.alpha = (int)std::clamp(a, 10.f, 100.f);
-        else if (n == 4) for (auto &g : groups) if (!strcmp(g.id, name)) { g.x = std::clamp(a, 0.f, 1.f); g.y = std::clamp(b, 0.f, 1.f); g.scale = std::clamp(c, 0.5f, 2.5f); }
+        else if (n == 4) for (auto &g : groups) if (!strcmp(g.id, name)) { g.x = a < 0 ? UNPLACED : std::clamp(a, 0.f, 1.f); g.y = b < 0 ? UNPLACED : std::clamp(b, 0.f, 1.f); g.scale = std::clamp(c, 0.5f, 2.5f); }
     }
     fclose(f);
 }
@@ -88,13 +95,26 @@ void load_config(bool default_pad) {
 void update_layout() {
     float dp = ctx->GetDensityIndependentPixelRatio();
     float screen_w = out_w / dp, screen_h = out_h / dp;
+    float aux_left = 0, aux_top = 0;
     for (auto &g : groups) {
         float font = BASE_DP * model.size / 100.f * g.scale;
         float w = g.w_em * font, h = g.h_em * font;
         g.font = Rml::ToString(font) + "dp";
-        g.left = Rml::ToString(std::clamp(g.x * screen_w - w / 2, 0.f, std::max(0.f, screen_w - w))) + "dp";
         float y = g.y + (hud_top && &g == &groups[SYS_GROUP] ? HUD_TOP_RATIO : 0.f);
-        g.top = Rml::ToString(std::clamp(y * screen_h - h / 2, 0.f, std::max(0.f, screen_h - h))) + "dp";
+        float left = g.x * screen_w - w / 2, top = y * screen_h - h / 2;
+        int index = (int)(&g - groups);
+        if (g.x == UNPLACED) {
+            float pitch = SLOT_PITCH_EM * BASE_DP * model.size / 100.f * groups[AUX_GROUP].scale;
+            left = aux_left - (SLOT_COUNT - (index - FIRST_SLOT)) * pitch;
+            top = aux_top;
+        }
+        left = std::clamp(left, 0.f, std::max(0.f, screen_w - w));
+        top = std::clamp(top, 0.f, std::max(0.f, screen_h - h));
+        if (index == AUX_GROUP) { aux_left = left; aux_top = top; }
+        g.center_x = (left + w / 2) / screen_w;
+        g.center_y = (top + h / 2) / screen_h;
+        g.left = Rml::ToString(left) + "dp";
+        g.top = Rml::ToString(top) + "dp";
     }
     handle.DirtyVariable("g");
 }
@@ -212,6 +232,7 @@ void finger_event(const SDL_Event *e) {
             model.selected = g;
             handle.DirtyVariable("selected");
             f->group = g;
+            if (groups[g].x == UNPLACED) { groups[g].x = groups[g].center_x; groups[g].y = groups[g].center_y; }
             f->grab_x = groups[g].x - x / out_w;
             f->grab_y = groups[g].y - y / out_h;
         } else {

@@ -36,6 +36,7 @@ span { display: inline-block; }
 .i-map { decorator: image(i_map.png); }
 .i-menu { decorator: image(i_menu.png); }
 .i-gear { decorator: image(i_gear.png); }
+.i-save { decorator: image(i_save.png); }
 .pill { width: 1.6em; height: 0.8em; decorator: image(pill.png); }
 .pill.on { decorator: image(pill_on.png); }
 /* 글자 칸을 버튼 전체로 잡는다. line-height는 글자 자신의 크기 기준이라 버튼 높이 / 글자 크기로 쓴다. */

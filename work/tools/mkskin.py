@@ -81,6 +81,12 @@ def map_icon(d, s):
     d.polygon([(s*.14,s*.26),(s*.38,s*.16),(s*.62,s*.26),(s*.86,s*.16),(s*.86,s*.74),(s*.62,s*.84),(s*.38,s*.74),(s*.14,s*.84)], fill=CREAM, outline=DEEP)
     d.line((s*.38,s*.16,s*.38,s*.74), fill=GOLD_D, width=int(s*.035)); d.line((s*.62,s*.26,s*.62,s*.84), fill=GOLD_D, width=int(s*.035))
 
+def save_icon(d, s):  # 플로피 디스크
+    d.polygon([(s*.16,s*.14),(s*.72,s*.14),(s*.86,s*.28),(s*.86,s*.86),(s*.16,s*.86)], fill=CREAM, outline=DEEP)
+    d.rectangle((s*.3, s*.14, s*.66, s*.38), fill=GOLD_D, outline=DEEP)
+    d.rectangle((s*.52, s*.19, s*.6, s*.33), fill=CREAM)
+    d.rectangle((s*.28, s*.54, s*.74, s*.86), fill=NAVY, outline=DEEP)
+
 def menu_icon(d, s):
     for y in (.28, .5, .72):
         d.rounded_rectangle((s*.18, s*(y-.06), s*.82, s*(y+.06)), s*.05, fill=CREAM, outline=DEEP, width=int(s*.012))
@@ -100,4 +106,4 @@ pill('pill', NAVY, NAVY)
 pill('pill_on', BLUE, BLUE, glow=True)
 for n, a in (('up', 0), ('right', 90), ('down', 180), ('left', 270)):
     arrow(f'a_{n}', a, False); arrow(f'a_{n}_on', a, True)
-icon('i_bag', bag); icon('i_map', map_icon); icon('i_menu', menu_icon); icon('i_gear', gear_icon)
+icon('i_bag', bag); icon('i_map', map_icon); icon('i_menu', menu_icon); icon('i_gear', gear_icon); icon('i_save', save_icon)
