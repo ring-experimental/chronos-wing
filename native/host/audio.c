@@ -106,6 +106,9 @@ static void run_events(play_t *p) {
 #define MUSIC_FADE_FRAMES (RATE / 25) // 40ms
 static int music_fade;
 static bool sfx_scope;
+// 플레이리스트 재생. 켜져 있는 동안 게임의 배경음 요청과 정지는 무시하고 효과음만 받는다.
+// 곡 핸들은 플레이리스트가 따로 불러 게임의 정지 호출과 겹치지 않는다.
+static bool solo;
 
 static play_t *music_play(void) {
     for (int i = 0; i < 16; i++) if (plays[i].on) return &plays[i];
@@ -331,6 +334,10 @@ void audio_play(uint32_t handle, bool repeat) {
     }
     SDL_LockMutex(lock);
     play_t *m = music_play();
+    if (solo) {
+        SDL_UnlockMutex(lock);
+        return;
+    }
     if (m && m->s == seq) {
         // 효과음이 끝나 같은 곡을 다시 부르면 처음으로 돌리지 않고 핸들만 넘긴다.
         m->handle = handle;
@@ -350,8 +357,46 @@ void audio_sfx_scope(bool in_sfx) { sfx_scope = in_sfx; }
 void audio_music_stop(void) {
     if (!lock) return;
     SDL_LockMutex(lock);
-    music_stop_now();
+    if (!solo) music_stop_now();
     SDL_UnlockMutex(lock);
 }
 
 void audio_free(uint32_t handle) { audio_stop(handle); }
+
+// 곡을 바꿀 때 앞 곡은 페이드 뒤 synth_clear로 잔향까지 지워진다. 새 곡은 페이드가 끝나야 시작한다.
+void audio_solo_play(uint32_t handle) {
+    if (!handle || handle > nhandles || !lock) return;
+    SDL_LockMutex(lock);
+    solo = true;
+    music_stop_now();
+    for (int i = 0; i < 16; i++) if (!plays[i].on) {
+        plays[i] = (play_t){true, false, handles[handle - 1], 0, 0, handle};
+        break;
+    }
+    SDL_UnlockMutex(lock);
+}
+
+void audio_solo_stop(void) {
+    if (!lock) return;
+    SDL_LockMutex(lock);
+    if (solo) music_stop_now();
+    SDL_UnlockMutex(lock);
+}
+
+void audio_solo_end(void) {
+    if (!lock) return;
+    SDL_LockMutex(lock);
+    if (solo) music_stop_now();
+    solo = false;
+    SDL_UnlockMutex(lock);
+}
+
+bool audio_solo_active(void) { return solo; }
+
+bool audio_solo_playing(void) {
+    if (!lock) return false;
+    SDL_LockMutex(lock);
+    bool on = solo && music_play();
+    SDL_UnlockMutex(lock);
+    return on;
+}
