@@ -9,7 +9,8 @@
 #include <vector>
 
 extern "C" void host_key(int type, int code);
-extern "C" bool game_in_story_dialog(void);
+extern "C" bool game_in_dialog(void);
+extern "C" bool game_shortcuts_bought(void);
 
 namespace {
 
@@ -34,7 +35,7 @@ constexpr float BASE_DP = 34.f;
 
 // 데이터 모델 "ui"에 묶이는 값. 화면 표시는 문서의 data-* 바인딩이 결정한다.
 struct Model {
-    bool pad_on = false, dialog = false, edit = false;
+    bool pad_on = false, dialog = false, edit = false, shortcuts = false;
     int size = 100, alpha = 85, selected = -1;
 } model;
 
@@ -129,6 +130,7 @@ void bind_model() {
     m.RegisterArray<std::vector<Group *>>();
     m.Bind("g", &refs);
     m.Bind("dialog", &model.dialog);
+    m.Bind("shortcuts", &model.shortcuts);
     m.Bind("edit", &model.edit);
     m.Bind("selected", &model.selected);
     m.Bind("pad_on", &model.pad_on);
@@ -313,11 +315,16 @@ extern "C" bool ui_event(const SDL_Event *e) {
 extern "C" void ui_render(void) {
     if (!ctx) return;
     update_sizes();
-    bool dialog = game_in_story_dialog();
+    bool dialog = game_in_dialog();
     if (dialog != model.dialog) {
         if (dialog) ui_release_all();
         model.dialog = dialog;
         handle.DirtyVariable("dialog");
+    }
+    bool shortcuts = game_shortcuts_bought();
+    if (shortcuts != model.shortcuts) {
+        model.shortcuts = shortcuts;
+        handle.DirtyVariable("shortcuts");
     }
     ctx->Update();
     ctx->Render();

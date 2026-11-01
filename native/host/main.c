@@ -23,9 +23,26 @@ static int width_arg;
 void request_exit(void) { running = false; }
 SDL_Window *host_window(void) { return win; }
 
-// 대사가 진행되는 동안 1인 게임 내부 값이다. 컷신과 필드 대사 모두 해당한다(장면별 메모리 비교로 찾음).
-// 0x1a2940은 NPC 대화와 선택지에서도 1이다. 0x1a2cb1은 스토리 장면에서만 1이다.
-bool game_in_story_dialog(void) { return cpu.m && cpu.m[0x1a2940] && cpu.m[0x1a2cb1]; }
+// 스크립트 대사(0x1a2618 구조체, 키 처리는 0x11ec54)가 화면에 있는지 돌려준다. 대사(0x32, 0x35)가 뜨면 켜고 입력을 받는 화면이 뜨면 끈다.
+// 장면 전환 중에는 상태가 잠깐 바뀌고 실행 값도 한 프레임씩 꺼지므로 그 사이에는 유지한다.
+enum { SCRIPT_RUNNING = 0x1a2940, SCRIPT_STATE = 0x1a2944, GAME_POPUP_OPEN = 0x1a2604, NPC_SCENE_OPEN = 0x2100bc, DIALOG_HOLD_MS = 200 };
+
+bool game_in_dialog(void) {
+    static bool on;
+    static uint64_t stopped_at;
+    if (!cpu.m) return false;
+    int state = (int)(cpu.m[SCRIPT_STATE] | cpu.m[SCRIPT_STATE + 1] << 8 | cpu.m[SCRIPT_STATE + 2] << 16 | (unsigned)cpu.m[SCRIPT_STATE + 3] << 24);
+    if (cpu.m[GAME_POPUP_OPEN] || cpu.m[NPC_SCENE_OPEN] || state == 0x37 || state == 0x38) on = false;
+    else if (!cpu.m[SCRIPT_RUNNING]) {
+        if (now_ms() - stopped_at >= DIALOG_HOLD_MS) on = false;
+        return on;
+    } else if (state == 0x32 || state == 0x35) on = true;
+    stopped_at = now_ms();
+    return on;
+}
+
+// 스킬 단축키 구매 여부다. 주인공 구조체(0x1b0e58) +600이다.
+bool game_shortcuts_bought(void) { return cpu.m && cpu.m[0x1b0e58 + 600]; }
 
 // 높이 320을 유지하고 폭은 모니터 비율을 따른다(240~640). 창 모드 기본값은 원작 폭이다.
 static int choose_width(bool windowed) {
