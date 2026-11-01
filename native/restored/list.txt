@@ -2,3 +2,5 @@
 83694 title.c
 80674 worldmap.c
 805f8 worldmap.c
+457d8 charmenu.c wrap
+45c34 charmenu.c wrap

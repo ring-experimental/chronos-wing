@@ -191,11 +191,18 @@ with open(sys.argv[3], 'w') as w:
         w.write(f'void f_{e:x}(cpu_t*c);\n')
     # 사람이 옮긴 함수(파일 오프셋 목록)는 건너뛴다. 정의는 native/restored/에 있다.
     restored = {int(l.split()[0], 16) for l in open(sys.argv[4]) if l.strip() and not l.startswith('#')} if len(sys.argv) > 4 else set()
+    # `wrap`이 붙은 함수는 orig_f_<오프셋>으로 남겨 읽는 C가 원본을 호출할 수 있게 한다.
+    rows = [l.split() for l in open(sys.argv[4]) if l.strip() and not l.startswith('#')] if len(sys.argv) > 4 else []
+    wrapped = {int(x[0], 16) for x in rows if x[-1] == 'wrap'}
+    restored -= wrapped
     for e, f in sorted(funcs.items()):
         if e in restored:
             continue
         try:
-            w.write(gen(e, f) + '\n')
+            code = gen(e, f)
+            if e in wrapped:
+                code = code.replace(f'void f_{e:x}(cpu_t*c){{', f'void orig_f_{e:x}(cpu_t*c){{', 1)
+            w.write(code + '\n')
         except Exception as ex:
             fails.append((hex(e), str(ex)))
             w.write(f'void f_{e:x}(cpu_t*c){{c->fault=1;}}\n')

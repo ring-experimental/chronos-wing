@@ -45,6 +45,15 @@ uint64_t now_ms(void);
 void video_present(uint32_t fb_handle);
 void host_key(int type, int code);
 void audio_pause(bool paused);
+struct SDL_Window *host_window(void);
+
+enum { SAVE_TEXT_CHOOSE, SAVE_TEXT_IMPORT, SAVE_TEXT_EXPORT, SAVE_TEXT_CONFIRM, SAVE_TEXT_EXPORTED, SAVE_TEXT_EXPORT_FAILED, SAVE_TEXT_NO_SAVE, SAVE_TEXT_INVALID, SAVE_TEXT_IMPORT_FAILED, SAVE_TEXT_IMPORTED };
+uint32_t savefile_text(int id);
+void savefile_choose(bool import);
+void savefile_ask_overwrite(void);
+void savefile_overwrite_answer(bool yes);
+void savefile_poll(void);
+bool savefile_dialog_open(void);
 extern int screen_w, screen_h;
 void request_exit(void);
 

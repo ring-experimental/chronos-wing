@@ -28,6 +28,10 @@ Android는 첫 실행 때 APK 안의 데이터를 푼다. 뒤로 키는 CLEAR다
 - `run_test.sh`, `stress.sh`: 제어 파일로 키를 넣는 자동 시험. 저장 폴더를 따로 쓴다.
 - `CHRONOS_TRACE=<파일>`: API 호출을 WIE `wipic call` 로그와 같은 형식으로 남긴다. `work/tools/apidiff.py`로 비교한다.
 
+## 세이브 옮기기
+
+타이틀의 `캐릭터 관리` → `캐릭터 복구`에서 세이브를 파일 하나(`.cwsave`)로 내보내거나 들여온다. 서비스가 끝난 서버 복구를 대신한다. 들여오면 게임의 해시로 파일마다 검증하고, 기존 세이브는 저장 폴더의 `backup/`으로 옮긴 뒤 게임을 종료한다. `CERTIDATA`는 옮기지 않는다. `CHRONOS_SAVEFILE_TEST=<파일>`이면 파일 창 없이 그 경로를 쓴다.
+
 ## 출처
 
 - WIPI API 동작: [WIE](https://github.com/dlunch/wie) (MIT). 소스를 참고해 C로 옮겼고 링크하지 않는다.

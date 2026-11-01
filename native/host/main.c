@@ -21,6 +21,7 @@ extern float audio_peak;
 static int width_arg;
 
 void request_exit(void) { running = false; }
+SDL_Window *host_window(void) { return win; }
 
 // 대사가 진행되는 동안 1인 게임 내부 값이다. 컷신과 필드 대사 모두 해당한다(장면별 메모리 비교로 찾음).
 // 0x1a2940은 NPC 대화와 선택지에서도 1이다. 0x1a2cb1은 스토리 장면에서만 1이다.
@@ -363,8 +364,9 @@ int main(int argc, char **argv) {
             } while (SDL_PollEvent(&e));
         }
         ctrl_poll();
-        // 설정 중에는 게임을 멈춘다.
-        bool modal = ui_modal();
+        savefile_poll();
+        // 설정 중이나 파일 창이 열린 동안에는 게임을 멈춘다.
+        bool modal = ui_modal() || savefile_dialog_open();
         if (modal != paused) { paused = modal; audio_pause(paused); }
         if (!paused) timers_run();
         if (frame_dirty || paused) render_frame();

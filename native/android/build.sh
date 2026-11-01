@@ -39,7 +39,10 @@ $CC++ -shared -static-libstdc++ -Wl,-z,max-page-size=16384 $OBJS -L$O/lib/lib/$A
 
 # 자바와 패키징
 python3 $HERE/mkpak.py $B $O/assets/game.pak $B/ui
-$JDK/javac -nowarn -source 8 -target 8 -cp $JAR -d $O/java $SRC/android-project/app/src/main/java/org/libsdl/app/*.java 2>/dev/null
+# SDL의 Android 파일 창은 기본 이름을 받지 않아 저장 창에만 날짜 이름을 넣는다.
+JSRC=$O/java-src; rm -rf $JSRC; mkdir -p $JSRC; cp $SRC/android-project/app/src/main/java/org/libsdl/app/*.java $JSRC/
+python3 $HERE/patch_activity.py $JSRC/SDLActivity.java
+$JDK/javac -nowarn -source 8 -target 8 -cp $JAR -d $O/java $JSRC/*.java 2>/dev/null
 $BT/d8 --release --lib $JAR --min-api $API --output $O $O/java/org/libsdl/app/*.class
 $BT/aapt2 link -o $O/base.apk -I $JAR --manifest $HERE/AndroidManifest.xml -A $O/assets
 python3 $HERE/patch_manifest.py $O/base.apk $BT/aapt2
