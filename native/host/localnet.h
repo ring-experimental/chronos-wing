@@ -114,6 +114,7 @@ ln_member *ln_unit_find(int64_t uid);
 void ln_write_unit(const ln_member *m);
 // 응답 본문에 0x155210 형식으로 쓴다(be16 개수 + 항목).
 void ln_write_members(void);
+// 한 명만 쓴다. 3.7 응답(0x1542a4)이 같은 형식이다.
 // 요청 10.10의 (id, 레벨) 8쌍과 마지막 4.1의 합류 여부로 목록을 맞춘다. 배치와 피로도는 uid(슬롯+1)로 이어받는다.
 void ln_members_sync(const int16_t *ids, const int8_t *levels, int n);
 // id, level, 장비 보정으로 수치를 다시 계산한다. EMD/M, EMD/C3의 비율과 기준 곡선을 쓴다(localnet_staff.c).
