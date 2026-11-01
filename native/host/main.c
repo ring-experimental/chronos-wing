@@ -280,6 +280,13 @@ static void ctrl_poll(void) {
             if (k) { send_key(2, k); release_code = k; release_at = now_ms() + 150; }
         } else if (!strncmp(lines[i], "shot ", 5)) write_shot(lines[i] + 5);
         else if (!strncmp(lines[i], "winshot ", 8)) { static char p[1100]; snprintf(p, sizeof p, "%s", lines[i] + 8); winshot_path = p; frame_dirty = true; }
+        else if (!strcmp(lines[i], "bs")) { // 입력기가 보내는 Backspace. 글자와 순서가 섞이지 않게 바로 넘긴다.
+            SDL_Event b = {0};
+            b.key.type = SDL_EVENT_KEY_DOWN; b.key.scancode = SDL_SCANCODE_BACKSPACE; b.key.down = true;
+            ime_event(&b);
+            b.key.type = SDL_EVENT_KEY_UP; b.key.down = false;
+            ime_event(&b);
+        }
         else if (!strncmp(lines[i], "text ", 5)) ime_text(lines[i] + 5);
         else if (!strncmp(lines[i], "edit ", 5)) ime_compose(lines[i] + 5);
         else if (!strcmp(lines[i], "settings")) ui_toggle_settings();

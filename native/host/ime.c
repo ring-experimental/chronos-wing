@@ -103,28 +103,48 @@ static void field_show(const char *extra, int n) {
     W8_(c, FIELD + F_COMPOSE_W, (uint32_t)ime_text_width(extra, n));
 }
 
-static void field_commit(const char *s, int n) {
+static bool field_commit(const char *s, int n) {
     cpu_t *c = &cpu;
     int pos = (int16_t)R16_(c, FIELD + F_POS), max = (int16_t)R16_(c, FIELD + F_MAX);
     int tail_n = (int)strnlen((const char *)c->m + FIELD + F_TAIL, TEXT_CAP);
     if (max == NAME_FIELD_MAX) max = NAME_BYTES; // 이름 칸(닉네임, 받는 사람, 검색)은 패킷이 10바이트라 넘치면 글자가 잘린다
-    if (pos + tail_n + n > max) return;
+    if (pos + tail_n + n > max) return false;
     memcpy(field_text() + pos, s, (size_t)n);
     W16_(c, FIELD + F_POS, (uint32_t)(pos + n));
     field_show("", 0);
+    return true;
 }
 
 static uint32_t utf8_next(const char **p) {
     return SDL_StepUTF8(p, NULL);
 }
 
+// 입력기가 U+1100대 첫가끝 자모로 줄 수 있어 음절이나 호환 자모로 합친다. 다음 글자를 돌려주고 p를 옮긴다.
+static uint32_t next_char(const char **p) {
+    static const uint16_t CHO_COMPAT[19] = {0x3131, 0x3132, 0x3134, 0x3137, 0x3138, 0x3139, 0x3141, 0x3142, 0x3143, 0x3145, 0x3146, 0x3147, 0x3148, 0x3149, 0x314a, 0x314b, 0x314c, 0x314d, 0x314e};
+    uint32_t u = utf8_next(p);
+    if (u >= 0x1161 && u <= 0x1175) return 0x314f + u - 0x1161;
+    if (u < 0x1100 || u > 0x1112) return u;
+    const char *q = *p;
+    uint32_t v = utf8_next(&q);
+    if (v < 0x1161 || v > 0x1175) return CHO_COMPAT[u - 0x1100];
+    *p = q;
+    uint32_t syllable = 0xac00 + ((u - 0x1100) * 21 + v - 0x1161) * 28;
+    uint32_t t = utf8_next(&q);
+    if (t >= 0x11a8 && t <= 0x11c2) { *p = q; syllable += t - 0x11a7; }
+    return syllable;
+}
+
+// 칸에 못 넣은 글자 수. 입력기는 자기가 보낸 글자를 지운다고 믿고 Backspace를 보내므로, 이만큼은 칸을 건드리지 않는다.
+static int dropped;
+
 void ime_text(const char *utf8) {
     composing = false;
     field_show("", 0);
-    for (uint32_t u; (u = utf8_next(&utf8)) != 0;) {
+    for (uint32_t u; (u = next_char(&utf8)) != 0;) {
         char o[2];
         int n = to_euckr(u, o);
-        if (n) field_commit(o, n);
+        if (!n || !field_commit(o, n)) dropped++;
     }
 }
 
@@ -132,9 +152,23 @@ void ime_text(const char *utf8) {
 void ime_compose(const char *utf8) {
     char o[COMPOSE_MAX];
     int n = 0;
-    for (uint32_t u; (u = utf8_next(&utf8)) != 0 && n + 2 <= COMPOSE_MAX;) n += to_euckr(u, o + n);
+    for (uint32_t u; (u = next_char(&utf8)) != 0 && n + 2 <= COMPOSE_MAX;) n += to_euckr(u, o + n);
     composing = n > 0;
     field_show(o, n);
+}
+
+// 게임의 키 입력은 틱마다 한 칸(0x1593b0)이라 Backspace 뒤에 바로 오는 글자보다 늦게 처리되고 연속이면 사라진다.
+// 입력기는 조합을 Backspace + 새 글자로 보내므로(Android, macOS의 글자 교체) 칸에서 바로 지운다. 칸이 비었으면 게임의 취소로 넘긴다.
+static bool field_backspace(void) {
+    cpu_t *c = &cpu;
+    if (dropped) { dropped--; return true; }
+    int pos = (int16_t)R16_(c, FIELD + F_POS);
+    if (!pos) return field_text()[0] != 0;
+    const char *t = field_text();
+    pos -= pos >= 2 && (uint8_t)t[pos - 1] & 0x80 ? 2 : 1;
+    W16_(c, FIELD + F_POS, (uint32_t)pos);
+    field_show("", 0);
+    return true;
 }
 
 // 칸의 화면 위치를 입력기 후보 창에 알린다.
@@ -155,6 +189,7 @@ void ime_poll(void) {
     if (on == text_on) return;
     text_on = on;
     composing = false;
+    dropped = 0;
     SDL_Window *win = host_window();
     if (on) { set_area(); SDL_StartTextInput(win); }
     else SDL_StopTextInput(win);
@@ -182,6 +217,8 @@ bool ime_event(const SDL_Event *e) {
         default: return true;
         }
         if (composing) return true; // 입력기가 쓰는 키다
+        if (k == KEY_CLEAR && e->type == SDL_EVENT_KEY_DOWN && field_backspace()) return true;
+        if (k == KEY_CLEAR && e->type == SDL_EVENT_KEY_UP) { if (field_text()[0]) return true; }
         if (e->type == SDL_EVENT_KEY_DOWN) host_key(2, k);
         else if (!e->key.repeat) host_key(3, k);
         return true;
