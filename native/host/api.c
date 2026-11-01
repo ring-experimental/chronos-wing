@@ -252,8 +252,8 @@ static void api_media(cpu_t *c, uint32_t i) {
 
 enum {
     CASH_SCENE = 0x2100b8,
-    NET_REQUEST = 0x210035,
-    NET_RESULT = 0x210036,
+    NET_REQUEST = 0x21004f,
+    NET_RESULT = 0x210035,
     HERO_PTR = 0x19c8d4 + 0xbd8,
     HERO_SHORTCUTS_BOUGHT = 600,
     FN_NET_CLOSE = 0x156038,
