@@ -10,6 +10,7 @@
 
 extern "C" void host_key(int type, int code);
 extern "C" bool game_in_dialog(void);
+extern "C" bool devmode_hud_top(void);
 extern "C" bool game_shortcuts_bought(void);
 
 namespace {
@@ -31,7 +32,10 @@ Group groups[] = {
     {"item", 0.91f, 0.60f, 1.f, 1.f},
     {"menu", 0.91f, 0.48f, 0.8f, 0.8f},
 };
+constexpr int SYS_GROUP = 4;
 constexpr float BASE_DP = 34.f;
+constexpr float HUD_TOP_RATIO = 35.f / 320.f; // 상단 상태창 높이. 왼쪽 위 설정 버튼을 그만큼 내린다.
+bool hud_top = false;
 
 // 데이터 모델 "ui"에 묶이는 값. 화면 표시는 문서의 data-* 바인딩이 결정한다.
 struct Model {
@@ -89,7 +93,8 @@ void update_layout() {
         float w = g.w_em * font, h = g.h_em * font;
         g.font = Rml::ToString(font) + "dp";
         g.left = Rml::ToString(std::clamp(g.x * screen_w - w / 2, 0.f, std::max(0.f, screen_w - w))) + "dp";
-        g.top = Rml::ToString(std::clamp(g.y * screen_h - h / 2, 0.f, std::max(0.f, screen_h - h))) + "dp";
+        float y = g.y + (hud_top && &g == &groups[SYS_GROUP] ? HUD_TOP_RATIO : 0.f);
+        g.top = Rml::ToString(std::clamp(y * screen_h - h / 2, 0.f, std::max(0.f, screen_h - h))) + "dp";
     }
     handle.DirtyVariable("g");
 }
@@ -320,6 +325,10 @@ extern "C" void ui_render(void) {
         if (dialog) ui_release_all();
         model.dialog = dialog;
         handle.DirtyVariable("dialog");
+    }
+    if (devmode_hud_top() != hud_top) {
+        hud_top = !hud_top;
+        update_layout();
     }
     bool shortcuts = game_shortcuts_bought();
     if (shortcuts != model.shortcuts) {

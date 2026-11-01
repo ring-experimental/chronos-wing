@@ -29,6 +29,9 @@ void orig_f_264c(cpu_t *c);
 #define T_TRAIT "\xc6\xaf\xbc\xba\x20\xc6\xf7\xc0\xce\xc6\xae" // 특성 포인트
 #define T_GOD "\xb9\xab\xc0\xfb" // 무적
 #define T_MP "\x4d\x50\x20\xb9\xab\xc7\xd1" // MP 무한
+#define T_HUD "\xbb\xf3\xc5\xc2\xc3\xa2" // 상태창
+#define T_BOTTOM "\xc7\xcf\xb4\xdc" // 하단
+#define T_TOP "\xbb\xf3\xb4\xdc" // 상단
 
 enum {
     GOT_SCREEN = 0x2c,
@@ -63,7 +66,7 @@ enum {
     ITEM_EXPERT = 1,
     PANEL_W = 0xb0,
     PANEL_H = 0xa0,
-    ROW_H = 16,
+    ROW_H = 14,
     LABEL_X = 0x3e,
     VALUE_X = 0x82,
     KEY_CLEAR = -16,
@@ -84,12 +87,12 @@ enum {
     RARE_TRAIT_UNIT = 700, // 0x14ab54가 특성 값에 곱하는 수. 판정 범위는 0~32767이다.
 };
 
-enum { ROW_EXP, ROW_GOLD, ROW_RARE, ROW_ATTACK, ROW_SKILL, ROW_TRAIT, ROW_GOD, ROW_MP, ROW_COUNT };
-static const char *const LABELS[ROW_COUNT] = {T_EXP, T_GOLD, T_RARE, T_ATTACK, T_SKILL, T_TRAIT, T_GOD, T_MP};
+enum { ROW_EXP, ROW_GOLD, ROW_RARE, ROW_ATTACK, ROW_SKILL, ROW_TRAIT, ROW_GOD, ROW_MP, ROW_HUD, ROW_COUNT };
+static const char *const LABELS[ROW_COUNT] = {T_EXP, T_GOLD, T_RARE, T_ATTACK, T_SKILL, T_TRAIT, T_GOD, T_MP, T_HUD};
 static const int RATES[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 50, 100};
 #define RATE_COUNT ((int)(sizeof RATES / sizeof RATES[0]))
 
-static signed char values[ROW_COUNT]; // 배율 줄은 RATES의 번호, 토글 줄은 0 또는 1이다.
+static signed char values[ROW_COUNT] = {[ROW_HUD] = 1}; // 배율 줄은 RATES의 번호, 토글 줄은 0 또는 1이다. 상태창은 1이 상단이다.
 static int selected_row;
 static bool loaded;
 
@@ -106,9 +109,9 @@ static void load_values(void) {
     FILE *f = fopen(path, "rb");
     if (!f) return;
     signed char saved[ROW_COUNT];
-    if (fread(saved, 1, ROW_COUNT, f) == ROW_COUNT)
-        for (int i = 0; i < ROW_COUNT; i++)
-            if (saved[i] >= 0 && saved[i] < value_count(i)) values[i] = saved[i];
+    int n = (int)fread(saved, 1, ROW_COUNT, f); // 줄이 늘기 전 파일은 짧다. 없는 줄은 기본값을 쓴다.
+    for (int i = 0; i < n; i++)
+        if (saved[i] >= 0 && saved[i] < value_count(i)) values[i] = saved[i];
     fclose(f);
 }
 
@@ -123,6 +126,7 @@ static void save_values(void) {
 
 static int rate(int row) { load_values(); return RATES[values[row]]; }
 static bool enabled(int row) { load_values(); return values[row] != 0; }
+bool devmode_hud_top(void) { return enabled(ROW_HUD); }
 
 // 글은 게스트 메모리에 있어야 그리기 함수에 넘길 수 있다. 한 번 만들고 계속 쓴다.
 static uint32_t guest_text(const char *s) {
@@ -148,6 +152,7 @@ static uint32_t api_color(int r, int g, int b) {
 
 static const char *value_text(int row) {
     static const char *const RATE_TEXT[RATE_COUNT] = {"1" BAE, "2" BAE, "3" BAE, "4" BAE, "5" BAE, "6" BAE, "7" BAE, "8" BAE, "9" BAE, "10" BAE, "20" BAE, "50" BAE, "100" BAE};
+    if (row == ROW_HUD) return values[row] ? T_TOP : T_BOTTOM;
     if (is_toggle(row)) return values[row] ? "ON" : "OFF";
     return RATE_TEXT[values[row]];
 }
