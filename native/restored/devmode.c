@@ -1,6 +1,6 @@
 // 개발자모드. 메인메뉴의 빈 상태값 8을 환경설정과 같은 창으로 쓰고, 보상과 전투 함수에 배율을 건다.
 // 원본 0x1453bc, 0x1454f4, 0x145690, 0x145a88, 0x14609c를 감싸고 0x145b5c는 옮겼다. 값은 저장 폴더의 DEVMODE에 남는다.
-#include "restored.h"
+#include "panels.h"
 #include <stdio.h>
 
 void orig_f_453bc(cpu_t *c);
@@ -64,6 +64,8 @@ enum {
     STATE_DEV = 8,
     ITEM_DEV = 8,
     ITEM_EXPERT = 1,
+    ITEM_MUSIC = 14, // 원본 상태표(0~13) 밖의 번호다. 0x1453bc에 넘기기 전에 상태 8로 바꾼다.
+    ITEM_REPLAY = 15,
     PANEL_W = 0xb0,
     PANEL_H = 0xa0,
     ROW_H = 14,
@@ -94,6 +96,7 @@ static const int RATES[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 50, 100};
 
 static signed char values[ROW_COUNT] = {[ROW_HUD] = 1}; // 배율 줄은 RATES의 번호, 토글 줄은 0 또는 1이다. 상태창은 1이 상단이다.
 static int selected_row;
+static const menu_panel *active; // 상태 8에서 열린 창. NULL이면 개발자모드다.
 static bool loaded;
 
 static bool is_toggle(int row) { return row >= ROW_GOD; }
@@ -129,8 +132,8 @@ static bool enabled(int row) { load_values(); return values[row] != 0; }
 bool devmode_hud_top(void) { return enabled(ROW_HUD); }
 
 // 글은 게스트 메모리에 있어야 그리기 함수에 넘길 수 있다. 한 번 만들고 계속 쓴다.
-static uint32_t guest_text(const char *s) {
-    enum { MAX_TEXTS = 32 };
+uint32_t menu_guest_text(const char *s) {
+    enum { MAX_TEXTS = 64 };
     static struct { const char *s; uint32_t addr; } cache[MAX_TEXTS];
     for (int i = 0; i < MAX_TEXTS; i++) {
         if (cache[i].s == s) return cache[i].addr;
@@ -145,7 +148,7 @@ static uint32_t guest_text(const char *s) {
     return 0;
 }
 
-static uint32_t api_color(int r, int g, int b) {
+uint32_t menu_color(int r, int g, int b) {
     cpu_t *c = &cpu;
     return CALL(FN_CALL_R3, r, g, b, R32(R32(got(GOT_API)) + 0x58));
 }
@@ -162,9 +165,9 @@ static void draw_row(int row, int x, int y) {
     cpu_t *c = &cpu;
     uint32_t g = R32(got(GOT_SCREEN));
     const char *label = LABELS[row], *value = value_text(row);
-    uint32_t label_addr = guest_text(label), value_addr = guest_text(value);
+    uint32_t label_addr = menu_guest_text(label), value_addr = menu_guest_text(value);
     int label_len = (int)strlen(label), value_len = (int)strlen(value);
-    uint32_t label_color = api_color(0xe8, 0xd6, 0xab);
+    uint32_t label_color = menu_color(0xe8, 0xd6, 0xab);
     CALL(FN_DRAW_TEXT_COLOR, g, x + LABEL_X, y, label_addr, label_len, label_color, 0, 1);
     if (row == selected_row) CALL(FN_SET_COLOR, 0xff, 0xff, 0xff);
     else CALL(FN_SET_COLOR, 0xc6, 0x9c, 0x6e);
@@ -175,10 +178,20 @@ static void draw_row(int row, int x, int y) {
     }
 }
 
+void menu_draw_frame(int x, int y) {
+    cpu_t *c = &cpu;
+    CALL(FN_PANEL, x, y, PANEL_W, PANEL_H);
+}
+
+void menu_leave(void) {
+    cpu_t *c = &cpu;
+    CALL(FN_LEAVE, 1);
+}
+
 static void draw_panel(int x, int y) {
     cpu_t *c = &cpu;
     int top = (int)R32(got(GOT_SCREEN) + 0x4c) / 2 - 0x3e;
-    CALL(FN_PANEL, x, y, PANEL_W, PANEL_H);
+    menu_draw_frame(x, y);
     for (int i = 0; i < ROW_COUNT; i++) draw_row(i, x, top + i * ROW_H);
 }
 
@@ -205,8 +218,12 @@ static int menu_state(void) {
 }
 
 void f_453bc(cpu_t *c) {
+    int8_t next = (int8_t)c->r[0];
+    active = next == ITEM_MUSIC ? &music_panel : next == ITEM_REPLAY ? &replay_panel : NULL;
+    if (active) c->r[0] = STATE_DEV;
     orig_f_453bc(c);
     if (menu_state() != STATE_DEV) return;
+    if (active) { active->open(); return; }
     load_values();
     selected_row = 0;
     CALL(FN_CURSOR_RESET, got(GOT_CURSOR));
@@ -216,29 +233,35 @@ void f_454f4(cpu_t *c) {
     orig_f_454f4(c);
     if (menu_state() != STATE_DEV) return;
     uint32_t layout = CALL(FN_LAYOUT);
-    draw_panel((int)R32(layout + 0x60), (int)R32(layout + 0x64));
+    int x = (int)R32(layout + 0x60), y = (int)R32(layout + 0x64);
+    if (active) active->draw(x, y);
+    else draw_panel(x, y);
 }
 
 void f_45690(cpu_t *c) {
     if (menu_state() != STATE_DEV) { orig_f_45690(c); return; }
     if (CALL(FN_LEAVING) & 0xff) {
-        save_values();
+        if (active) { if (active->close) active->close(); }
+        else save_values();
         CALL(FN_BACK_TO_MENU);
         return;
     }
     orig_f_45690(c);
     CALL(FN_CURSOR_TICK, got(GOT_CURSOR));
+    if (active && active->tick) active->tick();
 }
 
 void f_45a88(cpu_t *c) {
     if (menu_state() != STATE_DEV) { orig_f_45a88(c); return; }
     int key = (int)c->r[0];
-    if (CALL(FN_ANIM_IDLE, got(GOT_MENU_ITEM)) & 0xff) panel_key(key);
+    if (!(CALL(FN_ANIM_IDLE, got(GOT_MENU_ITEM)) & 0xff)) return;
+    if (active) active->key(key);
+    else panel_key(key);
 }
 
-// 메인메뉴 좌우 이동. 개발자모드를 환경설정 다음에 끼운다. 열리지 않은 EXPERT는 건너뛴다(원본과 같다).
+// 메인메뉴 좌우 이동. 플레이리스트와 스토리 다시보기를 네트워크 다음에, 개발자모드를 환경설정 다음에 끼운다. 열리지 않은 EXPERT는 건너뛴다(원본과 같다).
 void f_4609c(cpu_t *c) {
-    static const signed char ORDER[] = {0, 1, 2, 3, 4, ITEM_DEV, 5, 6, 7};
+    static const signed char ORDER[] = {0, 1, 2, ITEM_MUSIC, ITEM_REPLAY, 3, 4, ITEM_DEV, 5, 6, 7};
     enum { COUNT = sizeof ORDER };
     int key = (int)c->r[0], step = 0;
     if (key == -4 || key == -2 || key == 54 || key == 56) step = 1;
@@ -254,23 +277,24 @@ void f_4609c(cpu_t *c) {
     W8(item, ORDER[pos]);
 }
 
-// 메인메뉴 항목 이름 그리기. tdf/MENU의 8번은 캐릭터 복구라 개발자모드 글만 따로 넘긴다.
+// 메인메뉴 항목 이름 그리기. tdf/MENU의 8번은 캐릭터 복구라 추가한 항목의 글은 따로 넘긴다.
 void f_45b5c(cpu_t *c) {
     uint32_t screen = got(GOT_SCREEN), table = got(GOT_MENU_STATE) + 4;
     int height = (int)R32(screen + 0x4c), half = height >> 1;
     int x = (int)R32(screen + 0x48) >> 1, y = half + ((height - half - 0x2d) >> 1) + 0x1c;
     int item = (int8_t)R8(got(GOT_MENU_ITEM));
     uint32_t text, len;
-    if (item == ITEM_DEV) {
-        text = guest_text(T_MENU);
-        len = (uint32_t)strlen(T_MENU);
+    const char *added = item == ITEM_DEV ? T_MENU : item == ITEM_MUSIC ? music_panel.label : item == ITEM_REPLAY ? replay_panel.label : NULL;
+    if (added) {
+        text = menu_guest_text(added);
+        len = (uint32_t)strlen(added);
     } else {
         text = CALL(FN_TEXT, table, item);
         len = CALL(FN_TEXT_LEN, table, item);
     }
     uint32_t width = CALL(FN_TEXT_WIDTH, text, len, 1);
     CALL(FN_DRAW_CURSOR, got(GOT_CURSOR), width, x, y);
-    uint32_t outline = api_color(4, 0x5a, 0x78);
+    uint32_t outline = menu_color(4, 0x5a, 0x78);
     CALL(FN_DRAW_TEXT_COLOR, R32(screen), x, y, text, len, 0xffffff, outline, 1);
 }
 

@@ -37,7 +37,7 @@ $(B)/tr.c: $(B)/codemap.json $(ROOT)/work/tools/thumb2c.py restored/list.txt
 $(B)/tr.o: $(B)/tr.c host/thumbrt.h
 	cc -O1 -w -std=gnu11 -Ihost $(TRFLAGS) -c $< -o $@
 
-$(B)/r_%.o: restored/%.c restored/restored.h host/host.h host/thumbrt.h
+$(B)/r_%.o: restored/%.c restored/restored.h restored/panels.h host/host.h host/thumbrt.h
 	cc $(CFLAGS) -c $< -o $@
 
 $(B)/%.o: host/%.c host/host.h host/thumbrt.h host/ui.h
@@ -91,7 +91,7 @@ $(WIN)/obj/tr.o: $(B)/tr.c host/thumbrt.h
 	mkdir -p $(WIN)/obj
 	$(WCC) -O1 -w -std=gnu11 -Ihost $(TRFLAGS) -c $< -o $@
 
-$(WIN)/obj/r_%.o: restored/%.c restored/restored.h host/host.h host/thumbrt.h
+$(WIN)/obj/r_%.o: restored/%.c restored/restored.h restored/panels.h host/host.h host/thumbrt.h
 	mkdir -p $(WIN)/obj
 	$(WCC) -O2 -w -std=gnu11 -D__USE_MINGW_ANSI_STDIO=1 -Ihost -I$(WSDL)/include -c $< -o $@
 
