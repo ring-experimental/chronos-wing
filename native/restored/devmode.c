@@ -56,6 +56,9 @@ enum {
     FN_LEAVE = 0x140930,
     FN_BACK_TO_MENU = 0x1454ac,
     FN_EXPERT_OPEN = 0x148290,
+    FN_LINK_ADD_EXP = 0x17d0f0, // (동료, 양). 동료가 0이면 아무것도 하지 않는다.
+    PLAYER_LINK = 0x11c,
+    MAX_EXP_GRANT = 0x3fffffff,
     FN_PLAYER = 0x147434,
     FN_MAX_MP = 0x12ecc4,
     FN_ADD_SKILL_POINT = 0x12edac,
@@ -322,8 +325,12 @@ void f_3eac(cpu_t *c) {
     uint32_t player = CALL(FN_PLAYER);
     int level = (int8_t)R8(player + PLAYER_LEVEL);
     int64_t scaled = (int64_t)amount * mul, limit = exp_to_max_level(player);
-    c->r[0] = (uint32_t)(scaled < limit ? scaled : limit);
+    if (scaled > MAX_EXP_GRANT) scaled = MAX_EXP_GRANT;
+    int64_t hero = scaled < limit ? scaled : limit;
+    c->r[0] = (uint32_t)hero;
     orig_f_3eac(c);
+    // 원본은 지급량을 소울링크 동료에게도 준다. 만렙 제한은 주인공 몫이므로 잘린 만큼을 동료에게 따로 준다.
+    if (scaled > hero) CALL(FN_LINK_ADD_EXP, R32(player + PLAYER_LINK), (uint32_t)(scaled - hero));
     // 원본은 한 번에 여러 레벨이 올라도 포인트를 한 번만 준다.
     int gained = (int8_t)R8(player + PLAYER_LEVEL) - level;
     for (int i = 1; i < gained; i++) {
