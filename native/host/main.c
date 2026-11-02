@@ -346,6 +346,8 @@ int main(int argc, char **argv) {
     extern FILE *api_trace;
     if (getenv("CHRONOS_TRACE")) api_trace = fopen(getenv("CHRONOS_TRACE"), "w");
 #ifdef __ANDROID__
+    extern void android_log_stderr(void);
+    android_log_stderr();
     windowed = false;
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");

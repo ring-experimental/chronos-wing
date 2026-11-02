@@ -7,6 +7,8 @@
 #else
 #include <signal.h>
 #include <sys/mman.h>
+#include <fcntl.h>
+#include <unistd.h>
 #endif
 
 static uint32_t free_head;
@@ -16,11 +18,27 @@ static uint32_t free_head;
 #define GUEST_RESERVE 0x100010000ull
 
 #ifndef _WIN32
+static struct sigaction old_segv, old_bus;
+
 static void on_fault(int sig, siginfo_t *si, void *uc) {
     (void)uc;
     uint64_t off = (uint64_t)(uintptr_t)si->si_addr - (uint64_t)(uintptr_t)cpu.m;
     if (off < GUEST_RESERVE) fprintf(stderr, "게스트 메모리 오류: 주소 %#llx, 마지막 간접 호출 %#x\n", (unsigned long long)off, host_last_call);
-    signal(sig, SIG_DFL); // 복귀하면 같은 자리에서 기본 동작으로 죽는다.
+#ifdef __ANDROID__
+    // 진단: 게스트 메모리와 레지스터를 저장 폴더에 남긴다. 어떤 객체가 원인인지는 tombstone에 없다.
+    if (off < GUEST_RESERVE) {
+        char path[1200];
+        snprintf(path, sizeof path, "%s/fault.bin", save_dir);
+        int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        if (fd >= 0) {
+            (void)!write(fd, cpu.r, sizeof cpu.r);
+            (void)!write(fd, cpu.m + GUEST_LOW, GUEST_MEM - GUEST_LOW);
+            close(fd);
+        }
+    }
+#endif
+    // 이전 처리기로 돌린다. 복귀하면 같은 자리에서 다시 죽고, Android는 debuggerd가 tombstone을 남긴다.
+    sigaction(sig, sig == SIGBUS ? &old_bus : &old_segv, NULL);
 }
 #endif
 
@@ -34,8 +52,8 @@ void guest_mem_alloc(void) {
     struct sigaction sa = {0};
     sa.sa_sigaction = on_fault;
     sa.sa_flags = SA_SIGINFO;
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGSEGV, &sa, &old_segv);
+    sigaction(SIGBUS, &sa, &old_bus);
 #endif
     cpu.m = p;
     cpu.memsz = GUEST_MEM;

@@ -4,6 +4,31 @@
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <android/log.h>
+
+// stderr를 logcat으로 보낸다. 게스트 메모리 오류 같은 진단은 stderr로 나온다.
+static void *stderr_pump(void *arg) {
+    int fd = (int)(intptr_t)arg;
+    char buf[1024];
+    ssize_t n;
+    while ((n = read(fd, buf, sizeof buf - 1)) > 0) {
+        buf[n] = 0;
+        __android_log_write(ANDROID_LOG_ERROR, "chronos", buf);
+    }
+    return NULL;
+}
+
+void android_log_stderr(void) {
+    int fd[2];
+    if (pipe(fd)) return;
+    setvbuf(stderr, NULL, _IONBF, 0);
+    dup2(fd[1], 2);
+    close(fd[1]);
+    pthread_t t;
+    if (!pthread_create(&t, NULL, stderr_pump, (void *)(intptr_t)fd[0])) pthread_detach(t);
+}
 
 static uint32_t read_u32(SDL_IOStream *io) { Uint32 v = 0; SDL_ReadU32LE(io, &v); return v; }
 

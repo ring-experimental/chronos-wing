@@ -44,7 +44,8 @@ JSRC=$O/java-src; rm -rf $JSRC; mkdir -p $JSRC; cp $SRC/android-project/app/src/
 python3 $HERE/patch_activity.py $JSRC/SDLActivity.java
 $JDK/javac -nowarn -source 8 -target 8 -cp $JAR -d $O/java $JSRC/*.java 2>/dev/null
 $BT/d8 --release --lib $JAR --min-api $API --output $O $O/java/org/libsdl/app/*.class
-$BT/aapt2 link -o $O/base.apk -I $JAR --manifest $HERE/AndroidManifest.xml -A $O/assets
+# CHRONOS_DEBUGGABLE=1: run-as로 세이브에 접근할 수 있는 진단 빌드.
+$BT/aapt2 link ${CHRONOS_DEBUGGABLE:+--debug-mode} -o $O/base.apk -I $JAR --manifest $HERE/AndroidManifest.xml -A $O/assets
 python3 $HERE/patch_manifest.py $O/base.apk $BT/aapt2
 cd $O
 zip -q -j base.apk classes.dex

@@ -85,7 +85,15 @@ static void api_kernel(cpu_t *c, uint32_t i) {
     switch (i) {
     case 0: { char b[1024]; knl_format(c, 0, gstr(r[0]), 1, b, sizeof b); fprintf(stderr, "[printk] %s\n", b); break; }
     case 1: r[0] = knl_format(c, r[0], gstr(r[1]), 2, NULL, 0); break;
-    case 7: request_exit(); break;
+    case 7: // 게임이 스스로 끝낸다. 어디서 불렀는지 남긴다.
+        fprintf(stderr, "게임 Exit 호출: LR %#x, 마지막 간접 호출 %#x, 스택", c->LR, host_last_call);
+        for (uint32_t i = 0, sp = c->SP; i < 48; i++) {
+            uint32_t v = R32(sp + i * 4);
+            if ((v & 1) && v >= 0x101000 && v < 0x19c000) fprintf(stderr, " %#x", v);
+        }
+        fprintf(stderr, "\n");
+        request_exit();
+        break;
     case 9: r[0] = 1; break;
     case 20: r[0] = handle_alloc(r[0]); break;
     case 21: r[0] = handle_alloc(r[0]); break;
