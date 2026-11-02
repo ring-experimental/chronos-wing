@@ -2,6 +2,7 @@
 // 사용법: chronos [게임 데이터 폴더] [--windowed] [--touch] [--width <폭>] [--save <폴더>] [--ctrl <파일>] [--soundfont <sf2>]
 #include "host.h"
 #include "ui.h"
+#include "gamepad.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <stdio.h>
@@ -293,6 +294,7 @@ static void ctrl_poll(void) {
         else if (!strncmp(lines[i], "edit ", 5)) ime_compose(lines[i] + 5);
         else if (!strcmp(lines[i], "settings")) ui_toggle_settings();
         else if (!strncmp(lines[i], "finger ", 7) || !strncmp(lines[i], "mouse ", 6)) inject_pointer(lines[i]);
+        else if (gamepad_ctrl(lines[i])) {}
         else if (!strcmp(lines[i], "quit")) running = false;
     }
     (void)pending_release;
@@ -350,7 +352,7 @@ int main(int argc, char **argv) {
 #endif
     SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "1");
     SDL_SetHint(SDL_HINT_IME_IMPLEMENTED_UI, "composition");
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) { SDL_Log("SDL_Init: %s", SDL_GetError()); return 1; }
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) { SDL_Log("SDL_Init: %s", SDL_GetError()); return 1; }
 #ifdef __ANDROID__
     if (!android_prepare_data()) { SDL_Log("게임 데이터 풀기 실패: %s", SDL_GetError()); SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "크로노스 윙", "게임 데이터를 풀지 못했습니다.", NULL); return 1; }
 #endif
@@ -371,6 +373,7 @@ int main(int argc, char **argv) {
     char ui_dir[1100], ui_cfg[1100];
     snprintf(ui_dir, sizeof ui_dir, "%s/../ui", game_dir);
     snprintf(ui_cfg, sizeof ui_cfg, "%s/../ui.ini", save_dir);
+    gamepad_init();
     if (!ui_init(win, ren, ui_dir, ui_cfg, force_pad)) SDL_Log("UI를 열지 못함: 패드와 설정 없이 진행");
 
     guest_mem_alloc();
@@ -393,7 +396,8 @@ int main(int argc, char **argv) {
         if (wait_event(&e, (int)wait)) {
             do {
                 if (e.type == SDL_EVENT_QUIT) { SDL_Log("종료 이벤트"); running = false; }
-                else if (e.type == SDL_EVENT_WILL_ENTER_BACKGROUND) ui_release_all();
+                else if (e.type == SDL_EVENT_WILL_ENTER_BACKGROUND) { ui_release_all(); gamepad_release_all(); }
+                if (gamepad_event(&e)) continue;
                 if (ui_event(&e)) continue;
                 if (ime_event(&e)) continue;
                 else if ((e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) && !e.key.repeat) {
@@ -410,6 +414,7 @@ int main(int argc, char **argv) {
             } while (SDL_PollEvent(&e));
         }
         ctrl_poll();
+        gamepad_tick();
         savefile_poll();
         ime_poll();
         // 설정 중이나 파일 창이 열린 동안에는 게임을 멈춘다.

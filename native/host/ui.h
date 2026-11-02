@@ -11,6 +11,11 @@ void ui_toggle_settings(void);
 void ui_toggle_auto(void);
 void ui_release_all(void);
 void ui_render(void);
+// 패드로 설정 창을 다룬다. 배치는 맵핑과 상관없이 고정이다.
+enum { UI_NAV_UP, UI_NAV_DOWN, UI_NAV_LEFT, UI_NAV_RIGHT, UI_NAV_OK, UI_NAV_BACK };
+void ui_pad_nav(int nav);
+bool ui_pad_capturing(void);     // 맵핑 창이 다음 버튼을 기다리는 중이면 true.
+bool ui_pad_capture(int input);  // 기다리는 중이면 이 버튼을 맵핑하고 true.
 #ifdef __cplusplus
 }
 #endif

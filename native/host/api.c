@@ -1,5 +1,6 @@
 // WIPI C 표 설치와 분배. 표 번호와 슬롯은 work/wipi-api.md 참고.
 #include "host.h"
+#include "gamepad.h"
 #include "localnet.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -124,10 +125,10 @@ static void api_kernel(cpu_t *c, uint32_t i) {
             r[0] = (uint32_t)-12;
             break;
         }
-        size_t l = strlen(gstr(r[0]));
+        size_t l = strlen(gstr(r[0])), changed_size = 0;
         uint32_t h = heap_alloc((uint32_t)l + 1);
         memcpy(c->m + h, gstr(r[0]), l + 1);
-        W32(r[1], (uint32_t)st.st_size);
+        W32(r[1], gamepad_resource(path, &changed_size) ? (uint32_t)changed_size : (uint32_t)st.st_size);
         r[0] = h;
         break;
     }
@@ -135,6 +136,14 @@ static void api_kernel(cpu_t *c, uint32_t i) {
         if ((int32_t)r[0] < 0) { r[0] = (uint32_t)-9; break; }
         char path[2048];
         resource_path(path, sizeof path, gstr(r[0]));
+        size_t changed_size;
+        const uint8_t *changed = gamepad_resource(path, &changed_size); // 조작 안내는 지금 쓰는 장치의 버튼으로 적는다.
+        if (changed) {
+            if (changed_size > r[2]) { r[0] = (uint32_t)-1; break; }
+            memcpy(c->m + handle_data(r[1]), changed, changed_size);
+            r[0] = 0;
+            break;
+        }
         FILE *f = fopen(path, "rb");
         if (!f) { r[0] = (uint32_t)-12; break; }
         fseek(f, 0, SEEK_END);

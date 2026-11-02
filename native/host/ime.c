@@ -76,6 +76,22 @@ static int to_euckr(uint32_t u, char *o) {
 
 static char *field_text(void) { return (char *)cpu.m + FIELD + F_TEXT; }
 
+static uint32_t utf8_next(const char **p);
+
+// UTF-8 글을 EUC-KR로 바꾼다. ASCII는 대소문자를 그대로 두고, 게임 글꼴에 없는 글자는 버린다. 바꾼 바이트 수를 돌려준다.
+int ime_utf8_to_euckr(const char *utf8, char *out, int cap) {
+    int n = 0;
+    for (uint32_t u; (u = utf8_next(&utf8)) != 0;) {
+        char o[2];
+        int l = u < 0x80 ? (o[0] = (char)u, 1) : to_euckr(u, o);
+        if (n + l >= cap) break;
+        memcpy(out + n, o, (size_t)l);
+        n += l;
+    }
+    out[n] = 0;
+    return n;
+}
+
 // 게임 글꼴의 대략 폭. 커서 위치에만 쓴다.
 int ime_text_width(const char *s, int n) {
     int w = 0;

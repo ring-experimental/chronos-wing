@@ -1,6 +1,7 @@
 // 터치 패드와 설정 화면. 패드는 손가락마다 따로 판정해 방향키와 공격을 동시에 누를 수 있고, 설정 화면은 RmlUi 이벤트를 쓴다.
 #include "ui.h"
 #include "ui_render.h"
+#include "gamepad.h"
 #include <RmlUi/Core.h>
 #include <algorithm>
 #include <cstdio>
@@ -50,19 +51,29 @@ constexpr float SLOT_PITCH_EM = 0.85f;
 constexpr float BASE_DP = 34.f;
 constexpr float LOG_ROW_RATIO = 14.f / 320.f; // 대사 기록 한 줄의 높이. 끌어서 넘길 때 쓴다.
 constexpr float HUD_TOP_RATIO = 35.f / 320.f; // 상단 상태창 높이. 왼쪽 위 설정 버튼을 그만큼 내린다.
+constexpr Uint64 CAPTURE_TIMEOUT_MS = 5000; // 맵핑 창이 버튼을 기다리는 시간.
 bool hud_top = false;
 
 // 데이터 모델 "ui"에 묶이는 값. 화면 표시는 문서의 data-* 바인딩이 결정한다.
 struct Model {
     bool pad_on = false, dialog = false, edit = false, shortcuts = false, auto_on = false, log = false;
     int size = 100, alpha = 85, selected = -1;
+    bool gamepad = false;
+    int capture = -1; // 다음 버튼을 기다리는 맵핑 줄.
 } model;
+
+// 맵핑 창의 한 줄.
+struct Bind { Rml::String name, key; };
+std::vector<Bind> binds;
+int pad_generation = -1;
+Uint64 capture_until;
 
 SDL_Window *window;
 SDL_Renderer *renderer;
 UiRender *render_if;
 Rml::Context *ctx;
-Rml::ElementDocument *pad, *settings, *editbar;
+Rml::ElementDocument *pad, *settings, *editbar, *binds_doc;
+Rml::ElementDocument *focus_pending; // 문서를 연 다음 Update 뒤에 첫 항목으로 포커스를 옮긴다. 목록 항목이 그때 생긴다.
 Rml::DataModelHandle handle;
 std::string cfg_path;
 int out_w, out_h;
@@ -75,6 +86,7 @@ void save_config() {
     if (!f) return;
     fprintf(f, "pad %d\nsize %d\nopacity %d\nautoplay %d\n", model.pad_on, model.size, model.alpha, dialog_auto());
     for (auto &g : groups) fprintf(f, "%s %.4f %.4f %.3f\n", g.id, g.x, g.y, g.scale);
+    for (int i = 0; i < gamepad_action_count(); i++) fprintf(f, "bind %s %s\n", gamepad_config_id(i), gamepad_config_value(i));
     fclose(f);
 }
 
@@ -87,9 +99,10 @@ void load_config(bool default_pad) {
     model.pad_on = default_pad;
     FILE *f = fopen(cfg_path.c_str(), "r");
     if (!f) return;
-    char name[32], line[128];
+    char name[32], line[128], value[32];
     float a, b, c;
     while (fgets(line, sizeof line, f)) {
+        if (sscanf(line, "bind %31s %31s", name, value) == 2) { gamepad_config_read(name, value); continue; }
         int n = sscanf(line, "%31s %f %f %f", name, &a, &b, &c);
         if (n == 2 && !strcmp(name, "pad")) model.pad_on = a != 0;
         else if (n == 2 && !strcmp(name, "size")) model.size = (int)std::clamp(a, 50.f, 200.f);
@@ -141,6 +154,26 @@ void update_sizes() {
 void show_settings() {
     settings->Show();
     settings->PullToFront();
+    focus_pending = settings;
+}
+
+void refresh_binds() {
+    binds.resize(gamepad_action_count());
+    for (int i = 0; i < (int)binds.size(); i++) binds[i] = {gamepad_action_name(i), gamepad_action_key(i)};
+    handle.DirtyVariable("binds");
+}
+
+void set_capture(int row) {
+    model.capture = row;
+    capture_until = SDL_GetTicks() + CAPTURE_TIMEOUT_MS;
+    handle.DirtyVariable("capture");
+}
+
+void close_binds() {
+    set_capture(-1);
+    binds_doc->Hide();
+    save_config();
+    show_settings();
 }
 
 void set_edit(bool on) {
@@ -171,6 +204,28 @@ void bind_model() {
     m.Bind("selected", &model.selected);
     m.Bind("pad_on", &model.pad_on);
     m.Bind("alpha", &model.alpha);
+    m.Bind("gamepad", &model.gamepad);
+    m.Bind("capture", &model.capture);
+    if (auto s = m.RegisterStruct<Bind>()) {
+        s.RegisterMember("name", &Bind::name);
+        s.RegisterMember("key", &Bind::key);
+    }
+    m.RegisterArray<std::vector<Bind>>();
+    m.Bind("binds", &binds);
+    m.BindEventCallback("open_binds", [](Rml::DataModelHandle, Rml::Event &, const Rml::VariantList &) {
+        settings->Hide();
+        binds_doc->Show();
+        binds_doc->PullToFront();
+        focus_pending = binds_doc;
+    });
+    m.BindEventCallback("close_binds", [](Rml::DataModelHandle, Rml::Event &, const Rml::VariantList &) { close_binds(); });
+    m.BindEventCallback("bind_start", [](Rml::DataModelHandle, Rml::Event &, const Rml::VariantList &args) {
+        if (!args.empty()) set_capture(args[0].Get<int>());
+    });
+    m.BindEventCallback("bind_reset", [](Rml::DataModelHandle, Rml::Event &, const Rml::VariantList &) {
+        gamepad_bind_reset();
+        save_config();
+    });
     m.BindFunc("pad_size", [](Rml::Variant &v) { v = model.size; }, [](const Rml::Variant &v) { model.size = v.Get<int>(); update_layout(); save_config(); });
     m.BindEventCallback("save", [](Rml::DataModelHandle, Rml::Event &, const Rml::VariantList &) { save_config(); });
     m.BindEventCallback("open_edit", [](Rml::DataModelHandle, Rml::Event &, const Rml::VariantList &) { set_edit(true); });
@@ -281,7 +336,25 @@ int mouse_button(int b) { return b == SDL_BUTTON_LEFT ? 0 : b == SDL_BUTTON_RIGH
 
 } // namespace
 
-extern "C" bool ui_modal(void) { return ctx && (model.edit || settings->IsVisible()); }
+extern "C" bool ui_modal(void) { return ctx && (model.edit || settings->IsVisible() || binds_doc->IsVisible()); }
+
+extern "C" bool ui_pad_capturing(void) { return ctx && model.capture >= 0; }
+
+extern "C" bool ui_pad_capture(int input) {
+    if (!ui_pad_capturing()) return false;
+    gamepad_bind(model.capture, input);
+    set_capture(-1);
+    save_config();
+    return true;
+}
+
+extern "C" void ui_pad_nav(int nav) {
+    if (!ctx) return;
+    if (nav == UI_NAV_BACK) { ui_toggle_settings(); return; }
+    static const Rml::Input::KeyIdentifier KEYS[] = {Rml::Input::KI_UP, Rml::Input::KI_DOWN, Rml::Input::KI_LEFT, Rml::Input::KI_RIGHT, Rml::Input::KI_RETURN};
+    ctx->ProcessKeyDown(KEYS[nav], 0);
+    ctx->ProcessKeyUp(KEYS[nav], 0);
+}
 
 extern "C" void ui_release_all(void) {
     if (!ctx) return;
@@ -290,6 +363,9 @@ extern "C" void ui_release_all(void) {
 
 extern "C" void ui_toggle_settings(void) {
     if (!ctx) return;
+    gamepad_release_all();
+    if (ui_pad_capturing()) { set_capture(-1); return; }
+    if (binds_doc->IsVisible()) { close_binds(); return; }
     if (model.edit) { set_edit(false); return; }
     ui_release_all();
     if (settings->IsVisible()) { settings->Hide(); save_config(); }
@@ -322,7 +398,8 @@ extern "C" bool ui_init(SDL_Window *win, SDL_Renderer *ren, const char *ui_dir, 
     pad = ctx->LoadDocument(dir + "/pad.rml");
     settings = ctx->LoadDocument(dir + "/settings.rml");
     editbar = ctx->LoadDocument(dir + "/editbar.rml");
-    if (!ctx || !pad || !settings || !editbar) { ctx = nullptr; return false; }
+    binds_doc = ctx->LoadDocument(dir + "/gamepad.rml");
+    if (!ctx || !pad || !settings || !editbar || !binds_doc) { ctx = nullptr; return false; }
     pad->Show();
     return true;
 }
@@ -389,7 +466,22 @@ extern "C" void ui_render(void) {
         ui_release_all();
         handle.DirtyVariable("log");
     }
+    if (gamepad_generation() != pad_generation) {
+        pad_generation = gamepad_generation();
+        refresh_binds();
+        if (gamepad_connected() != model.gamepad) {
+            model.gamepad = !model.gamepad;
+            handle.DirtyVariable("gamepad");
+            if (!model.gamepad && binds_doc->IsVisible()) close_binds();
+        }
+    }
+    if (ui_pad_capturing() && SDL_GetTicks() > capture_until) set_capture(-1);
     ctx->Update();
+    if (focus_pending) {
+        Rml::Element *first = focus_pending->QuerySelector("button.bind, #first");
+        if (first) first->Focus(true);
+        focus_pending = nullptr;
+    }
     ctx->Render();
     SDL_SetRenderClipRect(renderer, nullptr);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);

@@ -73,3 +73,20 @@ input.checkbox:checked { background-color: #f8c400; }
 .editbar { pointer-events: auto; display: flex; align-items: center; width: 62%; height: 2.8em; margin-bottom: 0.4em; padding: 0 0.3em; background-color: #183c70f5; border: 0.18em #f8c400; border-radius: 0.5em; box-sizing: border-box; }
 .editbar span { flex: 1 1 auto; text-align: center; pointer-events: auto; }
 .editbar button { flex: 0 0 auto; pointer-events: auto; }
+
+/* 패드 조작. 왼쪽, 오른쪽은 슬라이더 값을 바꾸는 데 쓴다. */
+button, input.checkbox { tab-index: auto; nav: auto; }
+input.range { tab-index: auto; nav-up: auto; nav-down: auto; }
+button:focus, input.checkbox:focus { border-color: #ffffff; background-color: #3f73c8; }
+input.checkbox:focus:checked { background-color: #fff0a0; }
+input.range:focus sliderbar { background-color: #ffffff; }
+
+/* 게임패드 키 설정. 좁은 화면에서는 한 줄씩 놓이고 스크롤된다. */
+.panel.wide { width: 38em; }
+.panel.wide h1 { margin-bottom: 0.4em; }
+.binds { display: flex; flex-wrap: wrap; max-height: 19em; overflow: auto; }
+button.bind { flex: 1 1 15em; display: flex; justify-content: space-between; height: 1.9em; line-height: 1.9em; margin: 0.1em 0.25em; padding: 0 0.6em; }
+button.bind .key { color: #ffd84d; }
+.binds scrollbarvertical { width: 0.5em; }
+.binds scrollbarvertical sliderbar { background-color: #f8c400; border-radius: 0.25em; }
+.binds scrollbarvertical sliderarrowdec, .binds scrollbarvertical sliderarrowinc { width: 0; height: 0; }

@@ -11,6 +11,8 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen
 UNIT, ASCENT, DESCENT = 64, 10, 1
 SPACE_ADVANCE = 4
 KOR_H, ENG_H = 14, 8
+SQUARE_ROWS = [0, 0, 0xf8, 0x88, 0x88, 0x88, 0xf8, 0]
+TRIANGLE_ROWS = [0, 0, 0x20, 0x50, 0x50, 0x88, 0xf8, 0]
 
 
 def rows_kor(d, index):
@@ -68,6 +70,12 @@ def main(game, out):
         glyphs[name] = outline(list(g), 8, 1)
         cmap[ch] = name
         metrics[name] = (advance(list(g), 8) * UNIT, 0)
+    # 패드 표시용 기호. 비트맵은 host/gamepad.c와 같고 ○은 영문 O를 쓴다.
+    for ch, rows in ((0x25A1, SQUARE_ROWS), (0x25B3, TRIANGLE_ROWS), (0x25CB, list(eng[6 + (ord('O') - 0x20) * ENG_H:6 + (ord('O') - 0x1f) * ENG_H]))):
+        name = f'u{ch:04X}'
+        glyphs[name] = outline(rows, 8, 1)
+        cmap[ch] = name
+        metrics[name] = (advance(rows, 8) * UNIT, 0)
     for i in range(len(info) // 2):  # 한글 2350자: haninfo는 KS X 1001 순서의 조합형 코드
         hi, lo = 0xb0 + i // 94, 0xa1 + i % 94
         ch = ord(bytes((hi, lo)).decode('euc-kr'))
