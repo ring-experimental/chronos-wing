@@ -43,3 +43,4 @@
 1a2dc replay.c wrap
 74188 music.c wrap
 7d3ec music.c wrap
+4fa10 animframe.c wrap
