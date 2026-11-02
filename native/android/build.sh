@@ -9,13 +9,13 @@ JDK=/opt/homebrew/opt/openjdk@21/bin; export PATH=$JDK:$PATH
 SRC=$B/deps/src; ABI=arm64-v8a; API=24
 mkdir -p $O/lib/lib/$ABI $O/java $O/assets
 
-# SDL3
-if [[ ! -f $O/sdl/libSDL3.so ]]; then
-  cmake -S $SRC -B $O/sdl -G Ninja -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+# SDL3. 16KB 페이지 기기에서도 올라가도록 세그먼트를 16KB로 정렬한다.
+if [[ ! -f $O/sdl16k/libSDL3.so ]]; then
+  cmake -S $SRC -B $O/sdl16k -G Ninja -DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384 -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
     -DANDROID_ABI=$ABI -DANDROID_PLATFORM=android-$API -DCMAKE_BUILD_TYPE=Release -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
-  cmake --build $O/sdl --target SDL3-shared
+  cmake --build $O/sdl16k --target SDL3-shared
 fi
-cp $O/sdl/libSDL3.so $O/lib/lib/$ABI/
+cp $O/sdl16k/libSDL3.so $O/lib/lib/$ABI/
 
 # 게임
 CC=$NDK/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android$API-clang
