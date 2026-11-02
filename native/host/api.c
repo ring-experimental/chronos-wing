@@ -80,6 +80,24 @@ static void resource_path(char *out, size_t cap, const char *name) {
     snprintf(out, cap, "%s/%s", game_dir, name);
 }
 
+// GetResourceID의 값은 경로 문자열의 게스트 주소다. 돌려받는 API가 없어 같은 경로에는 같은 주소를 준다.
+static uint32_t resource_id(cpu_t *c, const char *name) {
+    #define RESOURCE_BUCKETS 4096
+    static struct resource_entry { uint32_t id; struct resource_entry *next; } *buckets[RESOURCE_BUCKETS];
+    uint32_t hash = 2166136261u;
+    for (const char *p = name; *p; p++) hash = (hash ^ (uint8_t)*p) * 16777619u;
+    struct resource_entry **head = &buckets[hash % RESOURCE_BUCKETS];
+    for (struct resource_entry *e = *head; e; e = e->next)
+        if (!strcmp((char *)c->m + e->id, name)) return e->id;
+    size_t l = strlen(name);
+    uint32_t h = heap_alloc((uint32_t)l + 1);
+    if (!h) return 0;
+    memcpy(c->m + h, name, l + 1);
+    struct resource_entry *e = malloc(sizeof *e);
+    if (e) { e->id = h; e->next = *head; *head = e; }
+    return h;
+}
+
 static void api_kernel(cpu_t *c, uint32_t i) {
     uint32_t *r = c->r;
     switch (i) {
@@ -133,9 +151,8 @@ static void api_kernel(cpu_t *c, uint32_t i) {
             r[0] = (uint32_t)-12;
             break;
         }
-        size_t l = strlen(gstr(r[0])), changed_size = 0;
-        uint32_t h = heap_alloc((uint32_t)l + 1);
-        memcpy(c->m + h, gstr(r[0]), l + 1);
+        size_t changed_size = 0;
+        uint32_t h = resource_id(c, gstr(r[0]));
         W32(r[1], gamepad_resource(path, &changed_size) ? (uint32_t)changed_size : (uint32_t)st.st_size);
         r[0] = h;
         break;

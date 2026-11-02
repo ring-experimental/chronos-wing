@@ -124,7 +124,12 @@ void gfx_api(cpu_t *c, uint32_t i) {
         if (!screen_handle) screen_handle = fb_new(screen_w, screen_h);
         r[0] = screen_handle;
         break;
-    case 3: handle_free(r[0]); break;
+    case 3: // DestroyOffscreenFramebuffer. fb_new가 만든 머리와 화소 버퍼를 함께 푼다.
+        if (r[0]) {
+            handle_free(R32(handle_data(r[0]) + 16));
+            handle_free(r[0]);
+        }
+        break;
     case 4: r[0] = fb_new((int)r[0], (int)r[1]); break;
     case 5: memset(c->m + r[0], 0, 52); break;
     case 6: { // SetContext(ctx, op, value)
