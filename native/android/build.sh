@@ -1,6 +1,6 @@
 #!/bin/zsh
 # APK 빌드. Gradle 없이 NDK, build-tools로 만든다. 먼저 native에서 make를 돌려 build/tr.c와 게임 데이터를 준비한다.
-# 결과: build/android/chronos.apk (디버그 키 서명, arm64-v8a)
+# 결과: build/android/chronos.apk (android/chronos.keystore 서명, arm64-v8a)
 set -eu
 HERE=${0:A:h}; N=$HERE:h; B=$N/build; O=$B/android
 SDK=${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}
@@ -45,13 +45,23 @@ python3 $HERE/patch_activity.py $JSRC/SDLActivity.java
 $JDK/javac -nowarn -source 8 -target 8 -cp $JAR -d $O/java $JSRC/*.java 2>/dev/null
 $BT/d8 --release --lib $JAR --min-api $API --output $O $O/java/org/libsdl/app/*.class
 # CHRONOS_DEBUGGABLE=1: run-as로 세이브에 접근할 수 있는 진단 빌드.
-$BT/aapt2 link ${CHRONOS_DEBUGGABLE:+--debug-mode} -o $O/base.apk -I $JAR --manifest $HERE/AndroidManifest.xml -A $O/assets
+# 아이콘. 타이틀 화면을 Mac 빌드로 띄워 문구가 깜박여 꺼진 프레임(339)을 받아 만든다. 원본 파생물이라 build에만 둔다.
+if [[ ! -f $O/res/mipmap-anydpi-v26/ic_launcher.xml ]]; then
+  F=$O/icon-frames; rm -rf $F $O/res; mkdir -p $F/save
+  print '340 quit' > $F/script.txt
+  CHRONOS_FRAMELOG=$F CHRONOS_SCRIPT=$F/script.txt $B/chronos --windowed --save $F/save >/dev/null 2>&1
+  python3 $HERE/mkicon.py $F/$(awk '$1==339{print $2}' $F/log.txt).raw $O/res
+fi
+$BT/aapt2 compile --dir $O/res -o $O/res.zip
+$BT/aapt2 link ${CHRONOS_DEBUGGABLE:+--debug-mode} -o $O/base.apk -I $JAR --manifest $HERE/AndroidManifest.xml -A $O/assets -R $O/res.zip --auto-add-overlay
 python3 $HERE/patch_manifest.py $O/base.apk $BT/aapt2
 cd $O
 zip -q -j base.apk classes.dex
 (cd lib && zip -q -r ../base.apk lib)
 $BT/zipalign -f -p 16 base.apk aligned.apk
-[[ -f debug.keystore ]] || $JDK/keytool -genkeypair -keystore debug.keystore -storepass android -keypass android \
-  -alias debug -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Chronos Wing Debug" 2>/dev/null
-$BT/apksigner sign --ks debug.keystore --ks-pass pass:android --out chronos.apk aligned.apk
+# 서명 키. 키가 바뀌면 설치된 앱을 지워야 업데이트되므로(세이브 유실) build 밖에 두고 계속 쓴다. git에는 올리지 않는다.
+KS=$HERE/chronos.keystore
+[[ -f $KS ]] || $JDK/keytool -genkeypair -keystore $KS -storetype PKCS12 -storepass chronoswing -keypass chronoswing \
+  -alias chronos -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Chronos Wing" 2>/dev/null
+$BT/apksigner sign --ks $KS --ks-key-alias chronos --ks-pass pass:chronoswing --out chronos.apk aligned.apk
 ls -la chronos.apk

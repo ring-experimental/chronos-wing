@@ -21,3 +21,6 @@ work/tools/smaf2ev/Cargo.lock
 work/saves/
 
 __pycache__/
+
+# Android 서명 키
+native/android/*.keystore
