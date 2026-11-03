@@ -154,11 +154,41 @@ static void write_shot(const char *path) {
     fclose(o);
 }
 
-static void send_key(int type, int code) {
+static void game_key(int type, int code) {
     if (dialog_log_key(type, code)) return;
     if (replay_key(type, code)) return;
     uint32_t a[3] = {(uint32_t)type, (uint32_t)code, 0};
     guest_call(FN_INPUT, a, 3);
+}
+
+// 게임은 키를 하나만 기억한다(`0x140778`, `0x1407bc`: +0x3c 키, +0x38 눌림). 어떤 키를 떼든 눌림이 풀려서,
+// 오른쪽을 누른 채 아래를 눌렀다 떼면 멈추고, 아래로 옮긴 뒤 오른쪽을 떼도 멈춘다.
+// 방향키는 여기서 누른 순서를 기억해, 게임이 보는 키가 아닌 방향을 떼면 숨기고, 보는 방향을 떼면 남은 마지막 방향을 다시 누른다.
+// 키보드, 터치 패드, 게임패드가 모두 이 길로 온다.
+static int dir_held[4], dir_n, active_key;
+
+static void dir_forget(int code) {
+    int j = 0;
+    for (int i = 0; i < dir_n; i++) if (dir_held[i] != code) dir_held[j++] = dir_held[i];
+    dir_n = j;
+}
+
+static void send_key(int type, int code) {
+    bool dir = code >= -4 && code <= -1;
+    if (type == 2) {
+        if (dir) { dir_forget(code); dir_held[dir_n++] = code; }
+        active_key = code;
+        game_key(2, code);
+        return;
+    }
+    if (dir) {
+        dir_forget(code);
+        if (code != active_key) return;
+        if (dir_n) { active_key = dir_held[dir_n - 1]; game_key(2, active_key); return; }
+    }
+    // 방향이 아닌 키는 떼는 것 자체가 동작일 수 있어 그대로 넘기고, 남은 방향은 다시 누를 때까지 쉰다.
+    active_key = 0;
+    game_key(type, code);
 }
 
 static int key_from_scancode(SDL_Scancode s) {
