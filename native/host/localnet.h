@@ -132,9 +132,6 @@ bool ln_unit_fatigue_add(int64_t uid, int delta);
 // 마지막 4.1 요청 본문(net/upload). 없으면 NULL. 형식은 work/net-offline.md의 세션 절.
 const uint8_t *ln_upload(size_t *n);
 void ln_upload_set(const uint8_t *body, size_t n);
-// 동료 슬롯(0~9)의 합류 여부. 4.1 본문 오프셋 53부터 슬롯마다 10바이트다.
-bool ln_upload_joined(int slot);
-
 // 휴면과 보호쉴드(localnet_sleep.c). 끝나는 시각은 net/sleep에 둔다.
 // 프로필의 휴면 상태와 남은 분을 현재 시각으로 맞춘다. ln_write_profile이 부른다.
 void ln_sleep_tick(void);

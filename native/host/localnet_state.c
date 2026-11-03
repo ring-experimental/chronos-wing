@@ -5,7 +5,7 @@
 #include <string.h>
 #include <time.h>
 
-enum { PROFILE_MAGIC = 0x4c4e5031, UPLOAD_MAX = 0x800, UPLOAD_COMPANIONS = 53, COMPANION_SIZE = 10 };
+enum { PROFILE_MAGIC = 0x4c4e5031, UPLOAD_MAX = 0x800 };
 
 static ln_profile me;
 static bool me_loaded;
@@ -153,9 +153,38 @@ void ln_write_members(void) {
     for (int i = 0; i < member_count; i++) ln_write_unit(&members[i]);
 }
 
+// 합류 여부는 세이브의 동료 항목에 없다. 4.1 본문 동료 칸의 첫 바이트는 소울링크 표시다(0x104288이 0x17cfec로 켜고 0x17cff4로 끈다).
+// 함선 방 스크립트(MAP/SC/000, 129, 131, 132)의 첫 블록은 스토리 변수가 2일 때 동료 NPC를 남긴다.
+// 변수는 f6 조건(0x11a1e4 → 0x11ea0c)이 읽는 표(+0x7b4)다. 네트워크 중에는 게임이 MAINGAMEDATA를 읽지 않으므로(0x1436e8)
+// 같은 복호화 함수로 파일에서 직접 읽는다. 앞의 13바이트(0x17c2c0), 35바이트(0x1822a0), 다른 변수표 256바이트 뒤에 있다.
+enum {
+    FN_LOAD_SEALED_SAVE = 0x1849fc, // (이름, 버퍼, 크기). 1 성공, 0 읽기 실패, -1 해시 불일치
+    STORY_SAVE_SIZE = 1000, STORY_VARS_AT = 13 + 35 + 256, STORY_VAR_COUNT = 256, STORY_DONE = 2,
+};
+static const uint8_t JOIN_VAR[LN_MEMBER_MAX] = {
+    0x03, 0x03, 0x03, 0x03, // 엔지, 레이, 리키, 후거스 (SC/132, 000, 131)
+    0x07,                   // 보우머 (SC/000)
+    0x05, 0x05,             // 쟝, 펭 (SC/129)
+    0x0f,                   // 팡 (SC/129)
+};
+
+// 스토리 세이브가 없거나 읽을 수 없으면 false다.
+static bool story_vars(uint8_t out[STORY_VAR_COUNT]) {
+    uint32_t mem = heap_alloc(STORY_SAVE_SIZE + 16);
+    strcpy(gstr(mem + STORY_SAVE_SIZE), "MAINGAMEDATA");
+    uint32_t a[3] = {mem + STORY_SAVE_SIZE, mem, STORY_SAVE_SIZE};
+    bool ok = (int)guest_call(FN_LOAD_SEALED_SAVE, a, 3) == 1;
+    if (ok) memcpy(out, cpu.m + mem + STORY_VARS_AT, STORY_VAR_COUNT);
+    heap_free(mem);
+    return ok;
+}
+
 // 표 앞 8칸이 모두 슬롯 순서로 덮이므로 응답하지 않은 칸의 /DAT/SL 이름이나 +0x44, +0x46이 어긋날 일이 없다.
 // 합류 안 한 동료는 피로도 100으로 보내 원본 화면이 회색, 전투불능으로 그리게 한다(정한 값).
 void ln_members_sync(const int16_t *ids, const int8_t *levels, int n) {
+    uint8_t vars[STORY_VAR_COUNT];
+    bool have_vars = story_vars(vars);
+    if (!have_vars) fprintf(stderr, "[net] MAINGAMEDATA를 읽지 못해 동료를 모두 합류 전으로 본다\n");
     enum { TABLE = 0x1a9e58, ENTRY = 0x74, NAME = 4 }; // 이름은 요청 직전 0x128278이 /DAT/SL에서 다시 읽어 둔 표에서 가져온다.
     ln_member old[LN_MEMBER_MAX];
     int old_n;
@@ -172,7 +201,7 @@ void ln_members_sync(const int16_t *ids, const int8_t *levels, int n) {
         m->level = levels[i];
         memcpy(m->name, gstr(TABLE + (uint32_t)i * ENTRY + NAME), sizeof m->name);
         m->name[sizeof m->name - 1] = 0;
-        bool joined = ln_upload_joined(i);
+        bool joined = have_vars && vars[JOIN_VAR[i]] == STORY_DONE;
         if (!joined) {
             m->floor = m->room = m->slot = -1;
             m->fatigue = 100;
@@ -197,11 +226,4 @@ void ln_upload_set(const uint8_t *body, size_t n) {
     memcpy(upload, body, n);
     upload_len = (long)n;
     if (!ln_save("upload", upload, n)) fprintf(stderr, "[net] 4.1 저장 실패\n");
-}
-
-bool ln_upload_joined(int slot) {
-    size_t n = 0;
-    const uint8_t *u = ln_upload(&n);
-    size_t at = UPLOAD_COMPANIONS + (size_t)slot * COMPANION_SIZE;
-    return u && at < n && u[at] != 0;
 }
