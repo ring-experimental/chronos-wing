@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 enum { FN_SHOW_MESSAGE = 0x157d84, FN_HASH = 0x13fc74, FN_DECRYPT = 0x105908, NET_UI = 0x20d758, MESSAGE_OPEN = 3 };
 
@@ -59,6 +60,23 @@ static uint64_t fnv(const uint8_t *p, size_t n) {
 
 static void path_of(char *out, size_t cap, const char *dir, const char *name) { snprintf(out, cap, "%s%s/%s", save_dir, dir, name); }
 
+// SDL_SaveFile은 열기에 실패해도, 닫으며 버퍼를 못 써도 성공을 돌려준다. 그래서 직접 열고 닫는 결과까지 본다.
+static bool write_all(const char *path, const void *data, size_t len) {
+    SDL_IOStream *io = SDL_IOFromFile(path, "wb");
+#ifdef __ANDROID__
+    // Android의 SDL은 파일 열기에 실패하면 에셋으로 넘어가 원래 이유(errno)를 지운다.
+    if (!io && path[0] == '/') {
+        FILE *f = fopen(path, "wb");
+        if (f) fclose(f);
+        else SDL_Log("fopen %s: %s", path, strerror(errno));
+    }
+#endif
+    if (!io) return false;
+    bool ok = SDL_WriteIO(io, data, len) == len;
+    if (!SDL_CloseIO(io)) ok = false;
+    return ok;
+}
+
 static void export_to(const char *path) {
     size_t cap = 16, len = 0;
     uint8_t *out = malloc(cap);
@@ -90,7 +108,22 @@ static void export_to(const char *path) {
     uint64_t h = fnv(out, len);
     memcpy(out + len, &h, 8);
     len += 8;
-    bool ok = SDL_SaveFile(path, out, len);
+#ifdef __ANDROID__
+    // 파일 창이 준 주소에 못 써도 adb로 꺼낼 수 있게 앱 전용 외부 폴더에도 남긴다(Android/data/<패키지>/files).
+    const char *ext = SDL_GetAndroidExternalStoragePath();
+    if (ext) {
+        SDL_Time now = 0;
+        SDL_DateTime t = {0};
+        SDL_GetCurrentTime(&now);
+        SDL_TimeToDateTime(now, &t, true);
+        char copy[1200];
+        snprintf(copy, sizeof copy, "%s/chronos-wing-%04d-%02d-%02d-%02d%02d%02d.cwsave", ext, t.year, t.month, t.day, t.hour, t.minute, t.second);
+        if (write_all(copy, out, len)) SDL_Log("내보내기 사본 %s", copy);
+        else SDL_Log("내보내기 사본 실패 %s: %s", copy, SDL_GetError());
+    }
+#endif
+    bool ok = write_all(path, out, len);
+    if (!ok) SDL_Log("내보내기 실패 %s: %s", path, SDL_GetError());
     free(out);
     message(ok ? SAVE_TEXT_EXPORTED : SAVE_TEXT_EXPORT_FAILED);
 }
