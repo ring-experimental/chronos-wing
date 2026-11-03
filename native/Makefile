@@ -19,7 +19,7 @@ TRFLAGS ?=
 CFLAGS := -O2 -g -w -std=gnu11 -Ihost -I/opt/homebrew/include
 LDFLAGS := -L/opt/homebrew/lib -lSDL3
 
-.PHONY: all windows android
+.PHONY: all windows android mac
 all: $(B)/chronos $(GAME)/client.bin $(B)/game.ev $(B)/1mgm.sf2 $(B)/ui
 
 $(GAME)/client.bin: $(ZIP)
@@ -106,6 +106,10 @@ $(WIN)/obj/manifest.o: windows/chronos.rc windows/chronos.manifest
 android: $(B)/tr.c $(GAME)/client.bin $(B)/game.ev $(B)/1mgm.sf2 $(B)/ui
 	[ -f $(call RML,android)/lib/librmlui.a ] || ./deps.sh android
 	android/build.sh
+
+# macOS 앱 묶음. 게임 데이터와 Homebrew 동적 라이브러리를 함께 넣어 단독으로 실행된다.
+mac: all
+	mac/bundle.sh
 
 # 사운드폰트 1MGM(고지는 third_party/1mgm.txt)
 $(B)/1mgm.sf2:

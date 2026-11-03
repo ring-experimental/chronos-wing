@@ -15,7 +15,8 @@ SDL3 패키지를 `build/deps`에 받아 둔다(`SDL3-devel-<버전>-mingw.tar.g
 
 ```bash
 make windows   # build/win 폴더 통째로 옮겨 chronos.exe 실행. 실행 파일 옆 game 폴더를 쓴다
-make android   # build/android/chronos.apk(arm64, 디버그 키). adb install로 설치
+make android   # build/android/chronos.apk(arm64, android/chronos.keystore 서명). adb install로 설치
+make mac       # build/mac/ChronosWing.app(arm64, 임시 서명)과 옮기기용 zip. 게임 데이터와 라이브러리가 들어 있어 단독 실행된다
 ```
 
 Android는 첫 실행 때 APK 안의 데이터를 푼다. 뒤로 키는 CLEAR다.
