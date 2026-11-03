@@ -16,7 +16,7 @@ enum { ACT_KEY, ACT_SETTINGS, ACT_AUTO, ACT_LOG };
 enum { DIR_UP, DIR_DOWN, DIR_LEFT, DIR_RIGHT, DIR_COUNT }; // ACTIONS의 앞 네 줄과 순서가 같다.
 enum {
     A_UP, A_DOWN, A_LEFT, A_RIGHT, A_OK, A_MENU, A_SKILL7, A_SKILL9, A_ITEM, A_MAP,
-    A_LSK, A_RSK, A_SLOT1, A_SLOT3, A_SLOT0, A_SETTINGS, A_LOG, A_AUTO, ACTION_COUNT,
+    A_LSK, A_SAVE, A_SLOT1, A_SLOT3, A_SLOT0, A_SETTINGS, A_LOG, A_AUTO, ACTION_COUNT,
 };
 enum {
     AXIS_ON = 16000, AXIS_OFF = 10000, MAX_PADS = 8,
@@ -36,7 +36,8 @@ static const struct { const char *id, *name; int kind, code, def; } ACTIONS[ACTI
     [A_ITEM] = {"item", "소지품", ACT_KEY, '*', SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
     [A_MAP] = {"map", "미니맵, 스킵", ACT_KEY, '#', SDL_GAMEPAD_BUTTON_LEFT_SHOULDER},
     [A_LSK] = {"lsk", "시스템 메뉴", ACT_KEY, -6, SDL_GAMEPAD_BUTTON_START},
-    [A_RSK] = {"rsk", "R 소프트키", ACT_KEY, -7, SDL_GAMEPAD_BUTTON_LEFT_STICK},
+    // L3는 이동 중에 스틱을 누르다 잘못 들어가기 쉬워 저장은 R3에 둔다. 예전 설정의 "rsk" 줄은 읽지 않는다.
+    [A_SAVE] = {"save", "저장", ACT_KEY, -7, SDL_GAMEPAD_BUTTON_RIGHT_STICK},
     [A_SLOT1] = {"slot1", "단축키 1", ACT_KEY, '1', NO_INPUT},
     [A_SLOT3] = {"slot3", "단축키 3", ACT_KEY, '3', NO_INPUT},
     [A_SLOT0] = {"slot0", "단축키 0", ACT_KEY, '0', NO_INPUT},
@@ -552,6 +553,31 @@ bad:
     free(in);
     free(out);
     return NULL;
+}
+
+// 게임 화면의 키 안내(필드 오른쪽 아래 소지품/미니맵, 컷신의 스킵). 패드로 조작 중이 아니면 false로 원본을 그대로 둔다.
+bool gamepad_hint(int kind, char *out, int cap) {
+    if (source != SOURCE_PAD) return false;
+    char t[TEXT_CAP] = "";
+    switch (kind) {
+    case GAMEPAD_HINT_ITEM: case GAMEPAD_HINT_MAP: {
+        int b = binds[kind == GAMEPAD_HINT_ITEM ? A_ITEM : A_MAP];
+        if (b != NO_INPUT) snprintf(t, sizeof t, "%s %s", input_label(b), kind == GAMEPAD_HINT_ITEM ? "ITEM" : "MAP");
+        break;
+    }
+    case GAMEPAD_HINT_SKIP: {
+        static const struct { int action; const char *word; } PARTS[] = {{A_LOG, "LOG"}, {A_AUTO, "AUTO"}, {A_MAP, "SKIP"}};
+        for (size_t i = 0; i < sizeof PARTS / sizeof PARTS[0]; i++) {
+            if (binds[PARTS[i].action] == NO_INPUT) continue;
+            size_t n = strlen(t);
+            snprintf(t + n, sizeof t - n, "%s%s %s", n ? "  " : "", input_label(binds[PARTS[i].action]), PARTS[i].word);
+        }
+        break;
+    }
+    default: return false;
+    }
+    game_text(t, out, cap);
+    return true;
 }
 
 // 시험용 가상 패드. vpad xbox|ps, vbtn <이름> [up], vaxis <이름> <값>, vdetach. 이름은 SDL 매핑 이름이다.

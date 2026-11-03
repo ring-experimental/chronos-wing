@@ -24,6 +24,10 @@ void gamepad_config_read(const char *id, const char *value);
 
 // 조작 안내가 든 리소스면 바꾼 글을 돌려준다. 바꿀 필요가 없으면 NULL이다. 다음 호출까지 유효하다.
 const uint8_t *gamepad_resource(const char *path, size_t *size);
+
+// 게임 화면에 그리는 키 안내를 EUC-KR로 채운다. 패드로 조작 중이 아니면 false이고 원본 그림과 글을 쓴다.
+enum { GAMEPAD_HINT_ITEM, GAMEPAD_HINT_MAP, GAMEPAD_HINT_SKIP };
+bool gamepad_hint(int kind, char *out, int cap);
 #ifdef __cplusplus
 }
 #endif

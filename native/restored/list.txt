@@ -44,3 +44,5 @@
 74188 music.c wrap
 7d3ec music.c wrap
 4fa10 animframe.c wrap
+444cc padhint.c wrap
+2c50c padhint.c wrap
