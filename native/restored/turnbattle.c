@@ -1,0 +1,886 @@
+// 턴제 전투 시제품. 필드 몬스터에 닿거나(0x148bfc 안의 0x148ba4), 몬스터가 공격하거나(0x14de84), 주인공이 몬스터를 치면(0x135a04)
+// 실시간 전투 대신 사이드뷰 턴제 전투를 연다. 전투 중에는 게임 타이머를 돌리지 않고(main.c) 열 때의 화면 위에 그린다.
+// 이기면 원본 피해 함수(0x14ad54)로 HP를 0으로 만들어 원래 죽음, 보상, 도감, 사냥 카운트 경로를 탄다.
+// 근거 주소와 정한 값은 work/turn-plan.md "조사 결과", "시제품".
+#include "restored.h"
+#include "turn.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+void orig_f_48bfc(cpu_t *c);
+void orig_f_4de84(cpu_t *c);
+void orig_f_35a04(cpu_t *c);
+uint32_t gfx_screen_handle(void);
+
+#define T_ATTACK "\xb0\xf8\xb0\xdd"                                                         // 공격
+#define T_SKILL "\xb0\xad\xc5\xb8"                                                          // 강타
+#define T_GUARD "\xb9\xe6\xbe\xee"                                                          // 방어
+#define T_ESCAPE "\xb5\xb5\xb8\xc1"                                                         // 도망
+#define T_FLED "\xb9\xab\xbb\xe7\xc8\xf7\x20\xb5\xb5\xb8\xc1\xc3\xc6\xb4\xd9\x21"             // 무사히 도망쳤다!
+#define T_NOFLEE "\xb5\xb5\xb8\xc1\xc4\xa5\x20\xbc\xf6\x20\xbe\xf8\xbe\xfa\xb4\xd9\x21"       // 도망칠 수 없었다!
+#define T_WIN "\xbd\xc2\xb8\xae\x21"                                                        // 승리!
+#define T_LOSE "\xc0\xfc\xb8\xea\xc7\xdf\xb4\xd9\x2e\x2e\x2e"                               // 전멸했다...
+#define T_NOMP "\x4d\x50\xb0\xa1\x20\xba\xce\xc1\xb7\xc7\xcf\xb4\xd9"                       // MP가 부족하다
+#define T_FIRST "\xbc\xb1\xc1\xa6\x20\xb0\xf8\xb0\xdd\x21"                                  // 선제 공격!
+#define T_AMBUSH "\xb1\xe2\xbd\xc0\xc0\xbb\x20\xb9\xde\xbe\xd2\xb4\xd9\x21"                 // 기습을 받았다!
+#define T_HERO "\xc4\xab\xc0\xcc"                                                           // 카이
+#define T_TARGET "\xb4\xeb\xbb\xf3\xc0\xbb\x20\xb0\xed\xb8\xa3\xbc\xbc\xbf\xe4"             // 대상을 고르세요
+#define T_GUARDING "\xb9\xe6\xbe\xee\x20\xc0\xda\xbc\xbc\xb8\xa6\x20\xc3\xeb\xc7\xdf\xb4\xd9" // 방어 자세를 취했다
+#define T_ENCOUNTER "\xb8\xf3\xbd\xba\xc5\xcd\xbf\xcd\x20\xb8\xb6\xc1\xd6\xc3\xc6\xb4\xd9\x21" // 몬스터와 마주쳤다!
+
+enum {
+    // 게임 함수
+    FN_HERO = 0x147434,       // 주인공 개체(0x1b0e58)
+    FN_CONTACT = 0x148ba4,    // (몬스터, 0) 몸통이 주인공 맞는 상자와 겹치면 참
+    FN_DAMAGE = 0x14ad54,     // (몬스터, -피해, 종류) HP를 깎고 죽음 판정
+    FN_MON_DEF = 0x14ebf0,    // (몬스터, 0 물리/1 마도) 방어
+    FN_MON_ATK = 0x14e494,    // (몬스터, 공격 번호) 공격력
+    FN_MON_ATK_KIND = 0x14e454, // (몬스터) 공격 종류(0 물리, 1 마도)
+    FN_MON_CRIT = 0x14ebb4,   // (몬스터) 치명타 %
+    FN_HERO_ATK = 0x101ff4,   // (슬롯) 무기 공격력
+    FN_HERO_ATK_PCT = 0x102188, // (슬롯) 공격 배율 %
+    FN_HERO_DEF = 0x101ef4,   // (0 물리/1 마도) 장비 방어 합
+    FN_HERO_DEF_CUT = 0x101f6c, // (방어, 종류, 치명타) 추가 감소
+    FN_RACE_ATK = 0x12e514,   // (주인공, 몬스터 속성) 주인공이 줄 때 상성 %
+    FN_RACE_DEF = 0x12e6ec,   // (주인공, 몬스터 속성) 주인공이 받을 때 상성 %
+    FN_REWARD = 0x14aa54,     // (몬스터) 드랍, 경험치, 사냥 카운트, 도감
+    FN_SET_CMD = 0x14e580,    // (몬스터, 명령, 방향, 0)
+    FN_APPLY_CMD = 0x14e814,  // (몬스터) 명령을 바로 반영
+    FN_EQUIP = 0x128f7c,      // (장비칸) 그림 번호(+1, 없으면 0)
+    FN_PANEL = 0x172aa8,
+    FN_DRAW_LINE = 0x12c50c,
+    FN_SET_COLOR = 0x12d734,
+
+    GOT_SCREEN = 0x2c, SCREEN_W = 0x48, SCREEN_H = 0x4c, GOT_MAP = 0x13c,
+    GOT_MONSTERS = 0x20, MONSTER_SLOTS = 50, MONSTER_COUNT = 0xc8,
+
+    // 몬스터(0x2bc)와 주인공은 같은 구조다
+    E_X = 0x8, E_Y = 0xc, E_ACTIVE = 0x18, E_MAP = 0x1c, E_EMD = 0xa8, E_STATE = 0xac, E_DIR = 0xae,
+    E_GRADE = 0xb1, E_RACE = 0xb3, E_NAME = 0xd0, E_HP = 0xec, E_HPMAX = 0xf0, E_LEVEL = 0x101,
+    E_RESPAWNS = 0x138,
+    MON_DYING = 5, MON_DEAD = 7, CMD_DEAD = 100,
+    H_CLASS = 0xb1, H_MP = 0x114, H_MPMAX = 0x118, H_LINK = 0x11c,
+
+    MEMBERS = 0x1a9e58, MEMBER_SIZE = 0x74, MEMBER_NAME = 4, MEMBER_LEVEL = 0x35, MEMBER_EMD = 0x48, MEMBER_COUNT = 8,
+    STORY_VARS = 0x1a2618 + 0x7b4, STORY_DONE = 2, EXPERT_VAR = 0xff,
+
+    FN_LOAD_SEALED = 0x184b54, FN_FREE_HANDLE = 0x183fd8,
+    EM_RECORD_TAIL = 0x30 + 5 * 10,
+
+    TICK_MS = 40,               // 원본 기본 25fps(0x1592a4)
+    MAX_ENEMIES = 3, MAX_PARTY = 4, MAX_ACTORS = MAX_ENEMIES + MAX_PARTY,
+    GROUP_RANGE = 72,           // 정한 값: 닿은 몬스터에서 이 거리 안의 몬스터가 같이 싸운다
+    COOLDOWN_MS = 2500,         // 정한 값: 전투가 끝난 뒤 다시 마주치지 않는 시간
+    SKILL_MP = 15,              // 정한 값
+    KEY_UP = -1, KEY_DOWN = -2, KEY_LEFT = -3, KEY_RIGHT = -4, KEY_OK = -5, KEY_CLEAR = -16,
+};
+
+static const uint8_t JOIN_VAR[MEMBER_COUNT] = {0x03, 0x03, 0x03, 0x03, 0x07, 0x05, 0x05, 0x0f}; // 엔지, 레이, 리키, 후거스, 보우머, 쟝, 펭, 팡
+
+typedef enum { P_IDLE, P_WALK, P_HIT, P_DEAD, P_ATTACK, P_SKILL } pose;
+
+typedef struct {
+    bool used, party, hero, alive, guarding;
+    char name[28];
+    int hp, hpmax, mp, mpmax, atk, pdef, mdef, level, speed, race;
+    uint32_t mon;          // 적이면 게임 몬스터 개체
+    bool boss;
+    ts_sprite spr;
+    ts_c0 c0;
+    bool has_c0;
+    int home_x, home_y, x, y;
+    pose pose;
+    int tick;              // 지금 동작의 경과 틱
+    int alpha;
+} actor;
+
+typedef enum { S_CLOSED, S_INTRO, S_NEXT, S_COMMAND, S_TARGET, S_ACT, S_MESSAGE, S_END } phase;
+typedef enum { A_ATTACK, A_SKILL, A_GUARD, A_ESCAPE } action;
+
+static struct {
+    phase phase;
+    actor a[MAX_ACTORS];
+    int n;
+    uint16_t *snapshot;
+    int w, h, bpl;
+    int order[MAX_ACTORS], order_n, order_at;
+    int cur, cursor, target;
+    action act;
+    int step, step_tick, hit_tick;
+    char msg[64];
+    int msg_ticks;
+    bool won, lost, fled, first_strike, ambushed;
+    uint64_t last_tick;
+    int popup_actor, popup_value, popup_ticks;
+} B;
+
+static uint32_t pending_monster;
+static int pending_kind; // 0 접촉, 1 몬스터 공격, 2 주인공 공격
+static uint64_t cooldown_until, check_at;
+static uint32_t check_mon;
+static int check_exp;
+static int enabled = -1;
+
+static bool turn_enabled(void) {
+    if (enabled < 0) enabled = getenv("CHRONOS_TURN") != NULL;
+    return enabled;
+}
+
+bool turn_battle_open(void) { return B.phase != S_CLOSED || pending_monster; }
+
+// ---- 게임 값 읽기 ----
+
+static int S8(uint32_t a) { cpu_t *c = &cpu; return (int8_t)R8(a); }
+static int S16(uint32_t a) { cpu_t *c = &cpu; return (int16_t)(R8(a) | R8(a + 1) << 8); }
+static int S32(uint32_t a) { cpu_t *c = &cpu; return (int32_t)R32(a); }
+static void W32s(uint32_t a, int v) { cpu_t *c = &cpu; W32(a, (uint32_t)v); }
+
+static bool monster_fightable(uint32_t m) {
+    cpu_t *c = &cpu;
+    if (!m || !R8(m + E_ACTIVE)) return false;
+    if (S32(m + E_HP) <= 0) return false;
+    int st = R8(m + E_STATE);
+    if (st == MON_DYING || st == MON_DEAD) return false;
+    int grade = R8(m + E_GRADE);
+    return grade < 4; // 4·5·6은 특수 개체(에너지 등). 0은 보스
+}
+
+static uint32_t monster_at(int i) {
+    cpu_t *c = &cpu;
+    uint32_t list = got(GOT_MONSTERS);
+    return R32(list + 4 * (uint32_t)i);
+}
+
+static int monster_count(void) {
+    cpu_t *c = &cpu;
+    int n = (int)R32(got(GOT_MONSTERS) + MONSTER_COUNT);
+    return n < 0 ? 0 : n > MONSTER_SLOTS ? MONSTER_SLOTS : n;
+}
+
+typedef struct { bool ok; int ems, img[3], pal[3], c0; } em_look;
+
+// EMD/M 레코드(0x14f73c): 이름 뒤 +2 묶음, +4 그림 3개, +10 팔레트 3개, +16 C0 번호
+static em_look em_load(int id) {
+    em_look r = {0};
+    cpu_t *c = &cpu;
+    uint32_t mem = heap_alloc(0x48);
+    snprintf(gstr(mem), 32, "/EMD/M/%03d", id / 10);
+    uint32_t h = CALL(FN_LOAD_SEALED, mem);
+    if (h) {
+        const uint8_t *d = c->m + handle_data(h);
+        size_t at = 2;
+        for (int i = 0; i < id % 10; i++) at += 1u + d[at] + EM_RECORD_TAIL;
+        const uint8_t *b = d + at + 1 + d[at];
+        #define LE16(p) ((int16_t)((p)[0] | (p)[1] << 8))
+        r.ems = LE16(b + 2);
+        for (int i = 0; i < 3; i++) { r.img[i] = LE16(b + 4 + 2 * i); r.pal[i] = LE16(b + 10 + 2 * i); }
+        r.c0 = LE16(b + 16);
+        #undef LE16
+        r.ok = true;
+        W32(mem + 0x44, h);
+        CALL(FN_FREE_HANDLE, mem + 0x44);
+    }
+    heap_free(mem);
+    return r;
+}
+
+static void load_em_sprite(actor *a, int id) {
+    em_look l = em_load(id);
+    if (!l.ok) { fprintf(stderr, "[turn] EMD/M %d 읽기 실패\n", id); return; }
+    ts_monster_sprite(&a->spr, game_dir, l.ems, l.img, l.pal);
+    a->has_c0 = ts_c0_load(&a->c0, game_dir, l.c0);
+}
+
+// 주인공 그림: 동작 묶음 H/S<클래스>(0x12ee2c), 시트 4장(0x1738fc): 0 HIMG/000/<칸1>, 1 HIMG/001/<칸2>, 2 무기 HIMG/002/<클래스>/<칸0>, 3 몸 HIMG/003/<클래스>
+static void load_hero_sprite(actor *a, int cls) {
+    char p[4][1100], ems[1100];
+    snprintf(p[0], sizeof p[0], "%s/HIMG/000/%03d", game_dir, (int)CALL(FN_EQUIP, 1));
+    snprintf(p[1], sizeof p[1], "%s/HIMG/001/%03d", game_dir, (int)CALL(FN_EQUIP, 2));
+    snprintf(p[2], sizeof p[2], "%s/HIMG/002/%03d/%03d", game_dir, cls, (int)CALL(FN_EQUIP, 0));
+    snprintf(p[3], sizeof p[3], "%s/HIMG/003/%03d", game_dir, cls);
+    const char *paths[4] = {p[0], p[1], p[2], p[3]};
+    snprintf(ems, sizeof ems, "%s/H/S%03d", game_dir, cls); // EMS와 같은 형식
+    ts_sprite_load_path(&a->spr, ems, paths, NULL, game_dir);
+}
+
+// ---- 전투 준비 ----
+
+static int rnd(int n) { return n > 0 ? rand() % n : 0; }
+
+static void add_enemy(uint32_t m) {
+    cpu_t *c = &cpu;
+    actor *a = &B.a[B.n++];
+    memset(a, 0, sizeof *a);
+    a->used = a->alive = true;
+    a->mon = m;
+    memcpy(a->name, gstr(m + E_NAME), 27);
+    a->hp = S32(m + E_HP);
+    a->hpmax = S32(m + E_HPMAX);
+    a->level = S8(m + E_LEVEL);
+    a->race = R8(m + E_RACE);
+    a->boss = R8(m + E_GRADE) == 0;
+    a->speed = 8 + a->level / 2; // 정한 값
+    a->alpha = 255;
+    load_em_sprite(a, S16(m + E_EMD));
+}
+
+static void add_hero(void) {
+    cpu_t *c = &cpu;
+    uint32_t h = CALL(FN_HERO);
+    actor *a = &B.a[B.n++];
+    memset(a, 0, sizeof *a);
+    a->used = a->alive = a->party = a->hero = true;
+    strcpy(a->name, T_HERO);
+    a->hp = S32(h + E_HP);
+    a->hpmax = S32(h + E_HPMAX);
+    a->mp = S32(h + H_MP);
+    a->mpmax = S32(h + H_MPMAX);
+    a->level = S8(h + E_LEVEL);
+    int weapon = (int)CALL(FN_HERO_ATK, 0), pct = (int)CALL(FN_HERO_ATK_PCT, 0);
+    a->atk = weapon * pct / 100;
+    if (a->atk <= 0) a->atk = 10 + a->level * 4; // 무기가 없으면(정한 값)
+    a->speed = 12 + a->level / 2; // 정한 값
+    a->alpha = 255;
+    fprintf(stderr, "[turn] 주인공 Lv%d HP %d/%d MP %d/%d 공격 %d(무기 %d × %d%%) 방어 %d/%d\n", a->level, a->hp, a->hpmax, a->mp, a->mpmax,
+            a->atk, weapon, pct, (int)CALL(FN_HERO_DEF, 0), (int)CALL(FN_HERO_DEF, 1));
+    load_hero_sprite(a, R8(h + H_CLASS));
+}
+
+// 동료 수치는 클라이언트에 없다. 네트워크 방어진(member_stats)과 같은 정한 값: HP 100+40L, 공격 10+4L, 방어 5+2L
+static void add_member(int i) {
+    cpu_t *c = &cpu;
+    uint32_t e = MEMBERS + (uint32_t)i * MEMBER_SIZE;
+    actor *a = &B.a[B.n++];
+    memset(a, 0, sizeof *a);
+    a->used = a->alive = a->party = true;
+    memcpy(a->name, gstr(e + MEMBER_NAME), 27);
+    a->level = S8(e + MEMBER_LEVEL);
+    if (a->level < 1) a->level = 1;
+    a->hp = a->hpmax = 100 + 40 * a->level;
+    a->atk = 10 + 4 * a->level;
+    a->pdef = a->mdef = 5 + 2 * a->level;
+    a->speed = 10 + a->level / 2;
+    a->alpha = 255;
+    load_em_sprite(a, S16(e + MEMBER_EMD));
+}
+
+static bool member_joined(int i) {
+    cpu_t *c = &cpu;
+    if (getenv("CHRONOS_TURN_ALL")) return true; // 시험용: 모든 동료 합류로 본다
+    return R8(STORY_VARS + EXPERT_VAR) == STORY_DONE || R8(STORY_VARS + JOIN_VAR[i]) == STORY_DONE;
+}
+
+// 자리: 적은 왼쪽(오른쪽을 봄), 아군은 오른쪽(왼쪽을 봄). 화면 높이 320 기준 위쪽 3/5이 전장이다.
+static void place(void) {
+    int ne = 0, np = 0, W = B.w;
+    for (int i = 0; i < B.n; i++) {
+        actor *a = &B.a[i];
+        if (a->party) {
+            a->home_x = W * 68 / 100 + (np & 1) * 34 + np * 4; // 두 줄로 엇갈려 선다
+            a->home_y = 84 + np * 32;
+            np++;
+        } else {
+            static const int ox[MAX_ENEMIES] = {0, -36, -36}, oy[MAX_ENEMIES] = {0, -36, 36};
+            a->home_x = W * 30 / 100 + ox[ne];
+            a->home_y = 140 + oy[ne];
+            ne++;
+        }
+        a->x = a->home_x;
+        a->y = a->home_y;
+    }
+}
+
+static void set_message(const char *s, int ticks) {
+    snprintf(B.msg, sizeof B.msg, "%s", s);
+    B.msg_ticks = ticks;
+}
+
+static void open_battle(uint32_t first, int kind) {
+    cpu_t *c = &cpu;
+    uint32_t sh = gfx_screen_handle();
+    if (!sh) return;
+    uint32_t f = handle_data(sh);
+    B.w = (int)R32(f); B.h = (int)R32(f + 4); B.bpl = (int)R32(f + 8);
+    uint8_t *px = c->m + handle_data(R32(f + 16));
+    B.snapshot = realloc(B.snapshot, (size_t)B.h * B.bpl);
+    memcpy(B.snapshot, px, (size_t)B.h * B.bpl);
+    // 배경 버퍼(화면 구조체 +4): 타일과 바닥 오브젝트만 구운 그림이라 캐릭터가 없다. 카메라(맵 구조체 +0x88, +0x8c)로 잘라 쓴다.
+    uint32_t bgh = R32(got(GOT_SCREEN) + 4);
+    if (bgh) {
+        uint32_t bf = handle_data(bgh);
+        int bw = (int)R32(bf), bh = (int)R32(bf + 4), bbpl = (int)R32(bf + 8);
+        const uint8_t *bp = c->m + handle_data(R32(bf + 16));
+        uint32_t map = got(GOT_MAP);
+        int cx = S32(map + 0x88), cy = S32(map + 0x8c);
+        fprintf(stderr, "[turn] 배경 버퍼 %dx%d, 화면 %dx%d, 카메라 %d,%d\n", bw, bh, B.w, B.h, cx, cy);
+        if (bw >= B.w && bh >= B.h) {
+            if (cx < 0) cx = 0;
+            if (cy < 0) cy = 0;
+            if (cx > bw - B.w) cx = bw - B.w;
+            if (cy > bh - B.h) cy = bh - B.h;
+            for (int y = 0; y < B.h; y++) memcpy((uint8_t *)B.snapshot + (size_t)y * B.bpl, bp + (size_t)(y + cy) * bbpl + (size_t)cx * 2, (size_t)B.w * 2);
+        }
+    }
+    // 어둡게
+    for (int y = 0; y < B.h; y++) {
+        uint16_t *row = (uint16_t *)((uint8_t *)B.snapshot + (size_t)y * B.bpl);
+        for (int x = 0; x < B.w; x++) {
+            uint16_t p = row[x];
+            row[x] = (uint16_t)(((p >> 11) * 3 / 5) << 11 | ((p >> 5 & 63) * 3 / 5) << 5 | (p & 31) * 3 / 5);
+        }
+    }
+    B.n = 0;
+    add_enemy(first);
+    int fx = S32(first + E_X), fy = S32(first + E_Y), map = S16(first + E_MAP);
+    for (int i = 0; i < monster_count() && B.n < MAX_ENEMIES; i++) {
+        uint32_t m = monster_at(i);
+        if (m == first || !monster_fightable(m) || S16(m + E_MAP) != map) continue;
+        if (abs(S32(m + E_X) - fx) <= GROUP_RANGE && abs(S32(m + E_Y) - fy) <= GROUP_RANGE) add_enemy(m);
+    }
+    add_hero();
+    uint32_t hero = CALL(FN_HERO);
+    uint32_t link = R32(hero + H_LINK);
+    int linked = link >= MEMBERS && link < MEMBERS + MEMBER_COUNT * MEMBER_SIZE ? (int)((link - MEMBERS) / MEMBER_SIZE) : -1;
+    if (linked >= 0 && member_joined(linked)) add_member(linked);
+    for (int i = 0; i < MEMBER_COUNT && B.n < MAX_ACTORS; i++)
+        if (i != linked && member_joined(i) && B.n - 0 < MAX_ACTORS) {
+            int party = 0;
+            for (int k = 0; k < B.n; k++) party += B.a[k].party;
+            if (party >= MAX_PARTY) break;
+            add_member(i);
+        }
+    place();
+    B.first_strike = kind == 2;
+    B.ambushed = kind == 1;
+    B.won = B.lost = B.fled = false;
+    B.order_n = B.order_at = 0;
+    B.popup_ticks = 0;
+    B.phase = S_INTRO;
+    B.step_tick = 0;
+    set_message(B.first_strike ? T_FIRST : B.ambushed ? T_AMBUSH : T_ENCOUNTER, 30);
+    B.last_tick = now_ms();
+    int enemies = 0;
+    for (int i = 0; i < B.n; i++) enemies += !B.a[i].party;
+    fprintf(stderr, "[turn] 전투 시작: 적 %d, 아군 %d, 계기 %d\n", enemies, B.n - enemies, kind);
+}
+
+// ---- 그림 ----
+
+static int pose_state(const actor *a, pose p) {
+    switch (p) {
+    case P_IDLE: return 0;
+    case P_WALK: return 1;
+    case P_HIT: return 2;
+    case P_DEAD: return 3;
+    default: return a->boss ? 9 : 7; // 공격 번호 = 상태 - 7(보스 - 9), 0x148980
+    }
+}
+
+// 주인공 동작(0x1336d8): 2 전투 대기, 3 전투 이동, 5 피격, 8 사망, 9~ 공격과 스킬(H/DS)
+static int hero_anim(pose p) {
+    switch (p) {
+    case P_IDLE: return 2;
+    case P_WALK: return 3;
+    case P_HIT: return 5;
+    case P_DEAD: return 8;
+    case P_SKILL: return 12;
+    default: return 9;
+    }
+}
+
+static void pose_anim(const actor *a, int *anim, int *dir, bool *mirror) {
+    *mirror = false;
+    if (a->hero) {
+        *anim = hero_anim(a->pose);
+        if (*anim >= a->spr.nanims) *anim = 9;
+        *dir = 2;
+        *mirror = a->party; // 방향 2는 오른쪽을 본다. 아군은 왼쪽을 봐야 하므로 반전
+        return;
+    }
+    int face = a->party ? 3 : 2; // 바라보는 방향 0~3, 2 오른쪽, 3은 2의 좌우 반전(왼쪽, 0x17ead0)
+    int st = pose_state(a, a->pose);
+    if (a->has_c0 && st < a->c0.count && a->c0.anim[st][face] >= 0) {
+        *anim = a->c0.anim[st][face];
+        *dir = a->c0.dir[st][face];
+    } else if (a->has_c0 && a->c0.anim[0][face] >= 0) {
+        *anim = a->c0.anim[0][face];
+        *dir = a->c0.dir[0][face];
+    } else {
+        *anim = st;
+        *dir = face;
+    }
+    if (*dir == 3) { *dir = 2; *mirror = true; }
+}
+
+static int pose_frames(const actor *a) {
+    int anim, dir;
+    bool mirror;
+    pose_anim(a, &anim, &dir, &mirror);
+    return ts_frames(&a->spr, anim, dir);
+}
+
+static bool pose_loops(pose p) { return p == P_IDLE || p == P_WALK; }
+
+static void set_pose(actor *a, pose p) { a->pose = p; a->tick = 0; }
+
+static void draw_text(int x, int y, int width, const char *text, uint32_t color, int center) {
+    static uint32_t buf;
+    if (!buf) buf = heap_alloc(80);
+    int len = (int)strlen(text);
+    if (len > 78) len = 78;
+    memcpy(gstr(buf), text, len);
+    gstr(buf)[len] = 0;
+    cpu_t *c = &cpu;
+    // 색은 0x12d734로 먼저 정하고 0x12c50c에는 -1(지금 색 유지)을 넘긴다. 대사 기록 창(dialog.c)과 같은 방식.
+    CALL(FN_SET_COLOR, color >> 16 & 0xff, color >> 8 & 0xff, color & 0xff);
+    CALL(FN_DRAW_LINE, R32(got(GOT_SCREEN)), x, y, width, buf, 0, 0, len, 0xffffffffu, 0, center);
+}
+
+static void fill(int x, int y, int w, int h, int r, int g, int b) {
+    cpu_t *c = &cpu;
+    CALL(FN_FILL_RECT, R32(got(GOT_SCREEN)), x, y, w, h, r, g, b);
+}
+
+static void bar(int x, int y, int w, int v, int max, int r, int g, int b) {
+    fill(x, y, w, 3, 0x20, 0x20, 0x20);
+    if (max > 0 && v > 0) fill(x, y, w * (v > max ? max : v) / max, 3, r, g, b);
+}
+
+static void draw_scene(void) {
+    cpu_t *c = &cpu;
+    uint32_t sh = gfx_screen_handle();
+    uint32_t f = handle_data(sh);
+    uint8_t *px = c->m + handle_data(R32(f + 16));
+    memcpy(px, B.snapshot, (size_t)B.h * B.bpl);
+    int panel_y = B.h - 96;
+    ts_target t = {px, B.w, B.h, B.bpl, 0, panel_y};
+    // 발 y 순서로 그린다
+    int idx[MAX_ACTORS];
+    for (int i = 0; i < B.n; i++) idx[i] = i;
+    for (int i = 1; i < B.n; i++)
+        for (int k = i; k > 0 && B.a[idx[k]].y < B.a[idx[k - 1]].y; k--) { int s = idx[k]; idx[k] = idx[k - 1]; idx[k - 1] = s; }
+    for (int i = 0; i < B.n; i++) {
+        actor *a = &B.a[idx[i]];
+        if (!a->used || a->alpha <= 0) continue;
+        int anim, dir;
+        bool mirror;
+        pose_anim(a, &anim, &dir, &mirror);
+        int n = ts_frames(&a->spr, anim, dir);
+        int fr = n ? (pose_loops(a->pose) ? a->tick % n : a->tick < n ? a->tick : n - 1) : 0;
+        ts_draw(&t, &a->spr, anim, dir, fr, a->x, a->y, mirror, a->alpha);
+    }
+    // 고르는 대상 표시
+    if (B.phase == S_TARGET) {
+        actor *a = &B.a[B.target];
+        fill(a->x - 3, a->y + 4, 7, 3, 0xff, 0xe0, 0x40);
+    } else if (B.phase == S_COMMAND) {
+        actor *a = &B.a[B.cur];
+        fill(a->x - 3, a->y + 4, 7, 3, 0x60, 0xd0, 0xff);
+    }
+    // 피해 숫자
+    if (B.popup_ticks > 0) {
+        actor *a = &B.a[B.popup_actor];
+        char s[16];
+        snprintf(s, sizeof s, "%d", B.popup_value);
+        draw_text(a->x, a->y - 56 - (20 - B.popup_ticks), 60, s, B.popup_value ? 0xffffff : 0xa0a0a0, 1);
+    }
+    // 위쪽 알림
+    if (B.msg_ticks > 0 && B.msg[0]) {
+        fill(0, 6, B.w, 18, 0x10, 0x18, 0x30);
+        draw_text(B.w / 2, 9, B.w, B.msg, 0xe8d6ab, 1);
+    }
+    // 아래 창: 왼쪽 명령, 오른쪽 아군 상태
+    CALL(FN_PANEL, 0, panel_y, B.w, B.h - panel_y);
+    fill(2, panel_y + 2, B.w - 4, B.h - panel_y - 4, 0x10, 0x18, 0x30);
+    int cmd_w = 70;
+    if (B.phase == S_COMMAND) {
+        static const char *cmds[4] = {T_ATTACK, T_SKILL, T_GUARD, T_ESCAPE};
+        bool hero = B.a[B.cur].hero;
+        for (int i = 0; i < 4; i++) {
+            bool usable = hero || i != 1;
+            uint32_t col = i == B.cursor ? 0xffe060 : usable ? 0xffffff : 0x707070;
+            if (i == B.cursor) fill(8, panel_y + 8 + i * 20, cmd_w - 12, 17, 0x30, 0x5f, 0xae);
+            draw_text(14, panel_y + 10 + i * 20, cmd_w, cmds[i], col, 0);
+        }
+    } else if (B.phase == S_TARGET) {
+        draw_text(cmd_w / 2 + 4, panel_y + 10, cmd_w, T_TARGET, 0xe8d6ab, 1);
+    }
+    int px0 = cmd_w + 8, row = 0;
+    for (int i = 0; i < B.n; i++) {
+        actor *a = &B.a[i];
+        if (!a->party) continue;
+        int y = panel_y + 8 + row * 21;
+        uint32_t col = !a->alive ? 0x808080 : (B.phase == S_COMMAND && i == B.cur) ? 0xffe060 : 0xffffff;
+        draw_text(px0, y, 70, a->name, col, 0);
+        char s[32];
+        snprintf(s, sizeof s, "%d/%d", a->hp, a->hpmax);
+        int bx = px0 + 62, bw = B.w - bx - 10;
+        if (bw > 120) bw = 120;
+        draw_text(bx, y - 1, bw, s, col, 0);
+        bar(bx, y + 13, bw, a->hp, a->hpmax, 0xe0, 0x40, 0x40);
+        if (a->hero) bar(bx, y + 17, bw, a->mp, a->mpmax, 0x40, 0x80, 0xff);
+        row++;
+    }
+    // 적 HP(이름과 막대)
+    for (int i = 0; i < B.n; i++) {
+        actor *a = &B.a[i];
+        if (a->party || !a->alive) continue;
+        bar(a->home_x - 20, a->home_y + 6, 40, a->hp, a->hpmax, 0xe0, 0x40, 0x40);
+    }
+    video_present(sh);
+}
+
+// ---- 전투 규칙(정한 값이 많다. work/turn-plan.md "시제품") ----
+
+static int alive_count(bool party) {
+    int n = 0;
+    for (int i = 0; i < B.n; i++) n += B.a[i].party == party && B.a[i].alive;
+    return n;
+}
+
+static void build_order(void) {
+    B.order_n = 0;
+    for (int i = 0; i < B.n; i++)
+        if (B.a[i].alive) B.order[B.order_n++] = i;
+    // 빠르기 순, 같으면 아군 먼저
+    for (int i = 1; i < B.order_n; i++)
+        for (int k = i; k > 0; k--) {
+            actor *p = &B.a[B.order[k - 1]], *q = &B.a[B.order[k]];
+            int sp = p->speed + rnd(4), sq = q->speed + rnd(4);
+            if (sq > sp) { int s = B.order[k]; B.order[k] = B.order[k - 1]; B.order[k - 1] = s; }
+        }
+    B.order_at = 0;
+}
+
+static int first_alive(bool party) {
+    for (int i = 0; i < B.n; i++)
+        if (B.a[i].party == party && B.a[i].alive) return i;
+    return -1;
+}
+
+// 아군 → 적: 원본 0x135a04와 같은 꼴(공격력 - 몬스터 방어, 최소 1, + 상성 0x102240 = (공격력-방어)×0x12e514%)
+static int damage_to_enemy(actor *from, actor *to, bool skill) {
+    cpu_t *c = &cpu;
+    int atk = from->atk * (skill ? 180 : 100) / 100;
+    atk = atk * (90 + rnd(21)) / 100;
+    int def = (int)CALL(FN_MON_DEF, to->mon, 0);
+    int dmg = atk - def;
+    if (dmg < 1) dmg = 1;
+    if (from->hero && atk - def > 0) dmg += (atk - def) * (int)CALL(FN_RACE_ATK, CALL(FN_HERO), (uint32_t)to->race) / 100;
+    return dmg;
+}
+
+// 적 → 주인공: 원본 0x14de84(공격력, 치명타, 방어 0x101ef4 + 감소 0x101f6c, 상성 0x12e6ec). 적 → 동료: 공격력 - 방어(정한 값)
+static int damage_to_party(actor *from, actor *to) {
+    cpu_t *c = &cpu;
+    uint32_t m = from->mon;
+    int kind = (int)CALL(FN_MON_ATK_KIND, m);
+    int atk = (int)CALL(FN_MON_ATK, m, 0);
+    bool crit = rnd(100) <= (int)(int8_t)CALL(FN_MON_CRIT, m);
+    if (crit) atk = atk * (S8(m + 0x178) * 7 + 100) / 100;
+    atk = atk * (90 + rnd(21)) / 100;
+    int dmg;
+    if (to->hero) {
+        int def = (int)CALL(FN_HERO_DEF, kind), cut = (int)CALL(FN_HERO_DEF_CUT, def, kind, crit);
+        dmg = atk - (int16_t)(def + cut);
+        dmg += dmg * (int)CALL(FN_RACE_DEF, CALL(FN_HERO), (uint32_t)from->race) / 100;
+    } else {
+        dmg = atk - (kind ? to->mdef : to->pdef);
+    }
+    if (dmg < 1) dmg = 1;
+    if (to->guarding) dmg /= 2;
+    return dmg < 1 ? 1 : dmg;
+}
+
+static void hit(actor *to, int dmg) {
+    to->hp -= dmg;
+    if (to->hp < 0) to->hp = 0;
+    B.popup_actor = (int)(to - B.a);
+    B.popup_value = dmg;
+    B.popup_ticks = 20;
+    set_pose(to, to->hp > 0 ? P_HIT : P_DEAD);
+    if (to->hp <= 0) to->alive = false;
+}
+
+static void begin_action(int actor_i, action act, int target) {
+    B.cur = actor_i;
+    B.act = act;
+    B.target = target;
+    B.step = 0;
+    B.step_tick = 0;
+    B.phase = S_ACT;
+}
+
+static void next_turn(void);
+
+static void enemy_turn(int i) {
+    int targets[MAX_PARTY], n = 0;
+    for (int k = 0; k < B.n; k++)
+        if (B.a[k].party && B.a[k].alive) targets[n++] = k;
+    if (!n) return;
+    begin_action(i, A_ATTACK, targets[rnd(n)]);
+}
+
+static void next_turn(void) {
+    if (!alive_count(false)) { B.won = true; set_message(T_WIN, 40); B.phase = S_END; B.step_tick = 0; return; }
+    if (!alive_count(true)) { B.lost = true; set_message(T_LOSE, 50); B.phase = S_END; B.step_tick = 0; return; }
+    for (;;) {
+        if (B.order_at >= B.order_n) build_order();
+        int i = B.order[B.order_at++];
+        actor *a = &B.a[i];
+        if (!a->alive) continue;
+        // 선제 공격이면 첫 바퀴는 아군만, 기습이면 적만
+        if (B.first_strike && !a->party) { if (B.order_at >= B.order_n) B.first_strike = false; continue; }
+        if (B.ambushed && a->party) { if (B.order_at >= B.order_n) B.ambushed = false; continue; }
+        a->guarding = false;
+        if (a->party) { B.cur = i; B.cursor = 0; B.phase = S_COMMAND; }
+        else enemy_turn(i);
+        if (B.order_at >= B.order_n) B.first_strike = B.ambushed = false;
+        return;
+    }
+}
+
+// 행동 진행: 0 다가가기(8틱) → 1 공격 동작(가운데에서 맞음) → 2 돌아가기(8틱) → 끝
+static void act_tick(void) {
+    actor *a = &B.a[B.cur], *t = &B.a[B.target];
+    enum { WALK = 8 };
+    if (B.act == A_GUARD) {
+        a->guarding = true;
+        set_message(T_GUARDING, 20);
+        B.phase = S_MESSAGE;
+        B.step_tick = 0;
+        return;
+    }
+    if (B.act == A_ESCAPE) {
+        bool ok = rnd(100) < 60; // 정한 값
+        for (int i = 0; i < B.n; i++) ok &= !B.a[i].boss;
+        if (ok) { B.fled = true; set_message(T_FLED, 30); B.phase = S_END; B.step_tick = 0; }
+        else { set_message(T_NOFLEE, 25); B.phase = S_MESSAGE; B.step_tick = 0; }
+        return;
+    }
+    int dir = a->party ? -1 : 1;
+    int gx = t->home_x - dir * 28, gy = t->home_y + 2;
+    switch (B.step) {
+    case 0:
+        if (B.step_tick == 0) set_pose(a, P_WALK);
+        B.step_tick++;
+        a->x = a->home_x + (gx - a->home_x) * B.step_tick / WALK;
+        a->y = a->home_y + (gy - a->home_y) * B.step_tick / WALK;
+        if (B.step_tick >= WALK) {
+            set_pose(a, B.act == A_SKILL ? P_SKILL : P_ATTACK);
+            int n = pose_frames(a);
+            B.hit_tick = n > 1 ? n / 2 : 0;
+            B.step = 1;
+            B.step_tick = 0;
+        }
+        break;
+    case 1: {
+        int n = pose_frames(a);
+        if (B.step_tick == B.hit_tick && t->alive) {
+            int dmg = a->party ? damage_to_enemy(a, t, B.act == A_SKILL) : damage_to_party(a, t);
+            hit(t, dmg);
+        }
+        B.step_tick++;
+        if (B.step_tick >= (n > 0 ? n : 1) + 2) { set_pose(a, P_WALK); B.step = 2; B.step_tick = 0; }
+        break;
+    }
+    case 2:
+        B.step_tick++;
+        a->x = gx + (a->home_x - gx) * B.step_tick / WALK;
+        a->y = gy + (a->home_y - gy) * B.step_tick / WALK;
+        if (B.step_tick >= WALK) {
+            a->x = a->home_x;
+            a->y = a->home_y;
+            set_pose(a, P_IDLE);
+            B.phase = S_MESSAGE;
+            B.step_tick = 0;
+        }
+        break;
+    }
+}
+
+static void finish(void) {
+    cpu_t *c = &cpu;
+    uint32_t hero = CALL(FN_HERO);
+    for (int i = 0; i < B.n; i++) {
+        actor *a = &B.a[i];
+        if (a->hero) {
+            W32s(hero + E_HP, a->hp > 0 ? a->hp : 1); // 시제품: 전멸해도 HP 1로 필드에 돌아간다(게임 오버는 다음 단계)
+            W32s(hero + H_MP, a->mp);
+        }
+        if (!a->party && B.won) {
+            uint32_t m = a->mon;
+            // 원본 피해 경로로 죽인다. 필드로 돌아가면 죽는 동작 → 0x14aa54 보상 → 동작 7로 이어진다.
+            int hp = S32(m + E_HP);
+            CALL(FN_DAMAGE, m, (uint32_t)-(hp > 0 ? hp : 1), 0);
+            if (S32(m + E_HP) > 0) { // 피해를 무시하는 맵(0x1750f0) 등: 바로 처치
+                W32s(m + E_HP, 0);
+                CALL(FN_REWARD, m);
+                CALL(FN_SET_CMD, m, CMD_DEAD, R8(m + E_DIR), 0);
+                CALL(FN_APPLY_CMD, m);
+            }
+        } else if (!a->party && a->mon) {
+            W32s(a->mon + E_HP, a->hp > 0 ? a->hp : 1);
+        }
+        ts_sprite_free(&a->spr);
+    }
+    fprintf(stderr, "[turn] 전투 끝: %s\n", B.won ? "승리" : B.fled ? "도망" : "전멸");
+    B.phase = S_CLOSED;
+    B.n = 0;
+    cooldown_until = now_ms() + COOLDOWN_MS;
+    check_at = now_ms() + 2000;
+    check_mon = B.won ? B.a[0].mon : 0;
+    check_exp = S32(hero + 0xf4);
+    // 열 때의 화면으로 돌려 둔다(다음 프레임에 게임이 다시 그린다)
+}
+
+static void step(void) {
+    for (int i = 0; i < B.n; i++) {
+        actor *a = &B.a[i];
+        a->tick++;
+        if (a->pose == P_HIT && a->tick >= pose_frames(a) + 3) set_pose(a, P_IDLE);
+        if (a->pose == P_DEAD && a->tick > pose_frames(a) + 4 && a->alpha > 0) a->alpha -= 25;
+    }
+    if (B.popup_ticks > 0) B.popup_ticks--;
+    if (B.msg_ticks > 0) B.msg_ticks--;
+    switch (B.phase) {
+    case S_INTRO:
+        if (++B.step_tick >= 25) { build_order(); next_turn(); }
+        break;
+    case S_ACT: act_tick(); break;
+    case S_MESSAGE:
+        if (++B.step_tick >= 14) next_turn();
+        break;
+    case S_END:
+        if (++B.step_tick >= 40) finish();
+        break;
+    default: break;
+    }
+}
+
+void turn_battle_tick(void) {
+    if (pending_monster && B.phase == S_CLOSED) {
+        uint32_t m = pending_monster;
+        pending_monster = 0;
+        if (monster_fightable(m)) open_battle(m, pending_kind);
+        if (B.phase == S_CLOSED) return;
+        draw_scene();
+        return;
+    }
+    if (check_at && now_ms() >= check_at) { // 시험용 기록: 처치가 원래 경로를 탔는지
+        cpu_t *c = &cpu;
+        uint32_t hero = CALL(FN_HERO);
+        if (check_mon) fprintf(stderr, "[turn] 2초 뒤: 경험치 %d → %d, 몬스터 상태 %d HP %d 남은 재출현 %d\n", check_exp, S32(hero + 0xf4), R8(check_mon + E_STATE), S32(check_mon + E_HP), S16(check_mon + E_RESPAWNS));
+        check_at = 0;
+    }
+    if (B.phase == S_CLOSED) return;
+    uint64_t now = now_ms();
+    if (now - B.last_tick < TICK_MS) return;
+    B.last_tick = now - (now - B.last_tick) % TICK_MS;
+    step();
+    if (B.phase != S_CLOSED) draw_scene();
+}
+
+static void choose_command(void) {
+    actor *a = &B.a[B.cur];
+    switch (B.cursor) {
+    case 0: B.act = A_ATTACK; break;
+    case 1:
+        if (!a->hero) return;
+        if (a->mp < SKILL_MP) { set_message(T_NOMP, 20); return; }
+        a->mp -= SKILL_MP;
+        B.act = A_SKILL;
+        break;
+    case 2: begin_action(B.cur, A_GUARD, B.cur); return;
+    case 3: begin_action(B.cur, A_ESCAPE, B.cur); return;
+    }
+    B.target = first_alive(false);
+    B.phase = S_TARGET;
+}
+
+static void move_target(int d) {
+    int i = B.target;
+    for (int k = 0; k < B.n; k++) {
+        i = (i + d + B.n) % B.n;
+        if (!B.a[i].party && B.a[i].alive) { B.target = i; return; }
+    }
+}
+
+bool turn_battle_key(int type, int code) {
+    if (B.phase == S_CLOSED) return pending_monster != 0;
+    if (type != 2) return true;
+    bool ok = code == KEY_OK || code == 53, back = code == KEY_CLEAR || code == 48;
+    if (B.phase == S_COMMAND) {
+        if (code == KEY_UP || code == 50) B.cursor = (B.cursor + 3) % 4;
+        else if (code == KEY_DOWN || code == 56) B.cursor = (B.cursor + 1) % 4;
+        else if (ok) choose_command();
+    } else if (B.phase == S_TARGET) {
+        if (code == KEY_UP || code == KEY_LEFT || code == 50 || code == 52) move_target(-1);
+        else if (code == KEY_DOWN || code == KEY_RIGHT || code == 56 || code == 54) move_target(1);
+        else if (ok) begin_action(B.cur, B.act, B.target);
+        else if (back) {
+            if (B.act == A_SKILL) B.a[B.cur].mp += SKILL_MP;
+            B.phase = S_COMMAND;
+        }
+    }
+    draw_scene();
+    return true;
+}
+
+// ---- 게임 훅 ----
+
+static bool can_start(uint32_t m) {
+    return turn_enabled() && B.phase == S_CLOSED && !pending_monster && now_ms() >= cooldown_until && monster_fightable(m);
+}
+
+// 몬스터 갱신 1단계. 전투가 잡혔거나 열려 있으면 몬스터를 멈춘다. 몸이 닿으면 전투를 잡는다.
+void f_48bfc(cpu_t *c) {
+    uint32_t m = c->r[0];
+    if (turn_enabled() && (pending_monster || B.phase != S_CLOSED)) return;
+    if (can_start(m) && CALL(FN_CONTACT, m, 0)) {
+        pending_monster = m;
+        pending_kind = 0;
+        return;
+    }
+    c->r[0] = m;
+    orig_f_48bfc(c);
+}
+
+// 몬스터 → 주인공 공격. 턴제에서는 피해 대신 기습 전투가 된다.
+void f_4de84(cpu_t *c) {
+    uint32_t m = c->r[0];
+    if (turn_enabled()) {
+        if (can_start(m)) { pending_monster = m; pending_kind = 1; }
+        c->r[0] = 0;
+        return;
+    }
+    orig_f_4de84(c);
+}
+
+// 주인공 → 몬스터 타격. 턴제에서는 피해 대신 선제 공격 전투가 된다.
+void f_35a04(cpu_t *c) {
+    uint32_t m = c->r[0];
+    if (turn_enabled()) {
+        if (can_start(m)) { pending_monster = m; pending_kind = 2; }
+        c->r[0] = (uint32_t)-1;
+        return;
+    }
+    orig_f_35a04(c);
+}
+
+// 시험용 제어 명령(main.c ctrl_poll): "turn nearest"는 가장 가까운 몬스터와 전투를 연다.
+bool turn_ctrl(const char *line) {
+    if (strncmp(line, "turn ", 5)) return false;
+    if (!strcmp(line + 5, "nearest") && B.phase == S_CLOSED) {
+        uint32_t hero = CALL(FN_HERO), best = 0;
+        int bd = 1 << 30;
+        for (int i = 0; i < monster_count(); i++) {
+            uint32_t m = monster_at(i);
+            if (!monster_fightable(m)) continue;
+            int d = abs(S32(m + E_X) - S32(hero + E_X)) + abs(S32(m + E_Y) - S32(hero + E_Y));
+            if (d < bd) { bd = d; best = m; }
+        }
+        if (best) { pending_monster = best; pending_kind = 0; }
+    }
+    return true;
+}

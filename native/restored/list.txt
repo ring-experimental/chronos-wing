@@ -46,3 +46,6 @@
 4fa10 animframe.c wrap
 444cc padhint.c wrap
 2c50c padhint.c wrap
+48bfc turnbattle.c wrap
+4de84 turnbattle.c wrap
+35a04 turnbattle.c wrap

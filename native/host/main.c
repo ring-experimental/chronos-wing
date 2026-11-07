@@ -1,6 +1,7 @@
 // 크로노스 윙 네이티브 진입점. SDL3 창, 입력, 시험용 제어 파일.
 // 사용법: chronos [게임 데이터 폴더] [--windowed] [--touch] [--width <폭>] [--save <폴더>] [--ctrl <파일>] [--soundfont <sf2>]
 #include "host.h"
+#include "../restored/turn.h"
 #include "ui.h"
 #include "gamepad.h"
 #include <SDL3/SDL.h>
@@ -155,6 +156,7 @@ static void write_shot(const char *path) {
 }
 
 static void game_key(int type, int code) {
+    if (turn_battle_key(type, code)) return;
     if (dialog_log_key(type, code)) return;
     if (replay_key(type, code)) return;
     uint32_t a[3] = {(uint32_t)type, (uint32_t)code, 0};
@@ -325,6 +327,7 @@ static void ctrl_poll(void) {
         else if (!strcmp(lines[i], "settings")) ui_toggle_settings();
         else if (!strncmp(lines[i], "finger ", 7) || !strncmp(lines[i], "mouse ", 6)) inject_pointer(lines[i]);
         else if (gamepad_ctrl(lines[i])) {}
+        else if (turn_ctrl(lines[i])) {}
         else if (!strcmp(lines[i], "quit")) running = false;
     }
     (void)pending_release;
@@ -423,7 +426,7 @@ int main(int argc, char **argv) {
         SDL_Event e;
         int64_t wait = timers_next_ms();
         // 시험용 제어 파일만 짧게 폴링한다. 평소에는 입력이나 다음 타이머까지 잔다.
-        int64_t max_wait = ctrl_path ? 10 : 100;
+        int64_t max_wait = ctrl_path || turn_battle_open() ? 10 : 100;
         if (wait > max_wait || wait < 0) wait = max_wait;
         if (wait_event(&e, (int)wait)) {
             do {
@@ -453,12 +456,14 @@ int main(int argc, char **argv) {
         bool modal = ui_modal() || savefile_dialog_open();
         if (modal != paused) { paused = modal; audio_pause(paused); }
         // 대사 기록 창이 열린 동안에도 게임을 멈춘다. 음악은 계속 나온다.
-        bool frozen = dialog_log_is_open();
+        // 턴제 전투 중에도 게임을 멈추고 전투 화면이 직접 그린다.
+        bool frozen = dialog_log_is_open() || turn_battle_open();
         if (!paused && !frozen) {
             dialog_auto_tick();
             replay_tick();
             timers_run();
         }
+        if (!paused) turn_battle_tick();
         if (frame_dirty || paused || frozen) render_frame();
     }
     SDL_Log("메인 루프 끝, 프레임 %llu", (unsigned long long)frames);
