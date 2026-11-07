@@ -56,6 +56,7 @@ uint64_t now_ms(void);
 void video_present(uint32_t fb_handle);
 // restored/replay.c
 void replay_tick(void);
+bool replay_scene_start(int key, int *map, int *x, int *y, int *main, int *dir, int *time, uint8_t flags[256], uint8_t quests[256]);
 bool replay_key(int type, int code);
 extern bool host_save_sandbox; // 참이면 게임의 저장 파일 쓰기를 버린다(api.c).
 // restored/dialog.c

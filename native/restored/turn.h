@@ -50,3 +50,7 @@ bool turn_battle_open(void);
 void turn_battle_tick(void);
 bool turn_battle_key(int type, int code);
 bool turn_ctrl(const char *line);
+
+// 시험 도구(turntest.c)
+void turn_test_tick(void);
+bool turn_test_ctrl(const char *cmd);

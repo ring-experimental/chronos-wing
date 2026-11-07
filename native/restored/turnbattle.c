@@ -26,6 +26,7 @@ uint32_t gfx_screen_handle(void);
 #define T_HERO "\xc4\xab\xc0\xcc"                                                           // 카이
 #define T_TARGET "\xb4\xeb\xbb\xf3\xc0\xbb\x20\xb0\xed\xb8\xa3\xbc\xbc\xbf\xe4"             // 대상을 고르세요
 #define T_GUARDING "\xb9\xe6\xbe\xee\x20\xc0\xda\xbc\xbc\xb8\xa6\x20\xc3\xeb\xc7\xdf\xb4\xd9" // 방어 자세를 취했다
+#define T_BOSS_FLED "\xb4\xde\xbe\xc6\xb3\xb5\xb4\xd9\x21"                                      // 달아났다!
 #define T_ENCOUNTER "\xb8\xf3\xbd\xba\xc5\xcd\xbf\xcd\x20\xb8\xb6\xc1\xd6\xc3\xc6\xb4\xd9\x21" // 몬스터와 마주쳤다!
 
 enum {
@@ -47,6 +48,10 @@ enum {
     FN_SET_CMD = 0x14e580,    // (몬스터, 명령, 방향, 0)
     FN_APPLY_CMD = 0x14e814,  // (몬스터) 명령을 바로 반영
     FN_EQUIP = 0x128f7c,      // (장비칸) 그림 번호(+1, 없으면 0)
+    FN_ATTACKABLE = 0x14b2cc, // (몬스터) 주인공이 칠 수 있는 상태(이 맵에 있음, 도주 중 아님, 무적 아님). 도주가 끝난 보스는 원래대로 돌린다
+    FN_ON_MAP = 0x14b460,     // (몬스터) 지금 맵에 있음(보스는 +0x194 맵)
+    FN_ESCAPING3 = 0x14ed34, FN_ESCAPING4 = 0x14ed6c, // (보스) 도주 중
+    FN_END_ESCAPE = 0x14a2d8, // (보스, 1) 도주 동작을 끝낸다
     FN_PANEL = 0x172aa8,
     FN_DRAW_LINE = 0x12c50c,
     FN_SET_COLOR = 0x12d734,
@@ -58,6 +63,12 @@ enum {
     E_X = 0x8, E_Y = 0xc, E_ACTIVE = 0x18, E_MAP = 0x1c, E_EMD = 0xa8, E_STATE = 0xac, E_DIR = 0xae,
     E_GRADE = 0xb1, E_RACE = 0xb3, E_NAME = 0xd0, E_HP = 0xec, E_HPMAX = 0xf0, E_LEVEL = 0x101,
     E_RESPAWNS = 0x138,
+    // 보스(0x14ad54 안의 0x14b1a8, 0x14b208): 누적 피해 +0x1d0이 최대 HP × +0x17e%에 닿으면 도주 3, HP가 최대 × +0x17f% 이하로 처음 내려가면(+0x19a) 도주 4
+    E_ESC_CUM_PCT = 0x17e, E_ESC_HP_PCT = 0x17f, E_ESC_HP_DONE = 0x19a, E_ESC_CUM = 0x1d0,
+    E_INVULN = 0x295, E_INVULN2 = 0x297, E_SUMMONED = 0x296, E_RUN_TICKS = 0x2b3,
+    GOT_SUMMONS = 0xbfc, GOT_STAGE = 0x13c, STAGE_MAP = 0x2d4,
+    MAP_PRACTICE_A = 0xb2, MAP_PRACTICE_B = 0xb3, // 0x1750f0: 몬스터가 죽지 않고 주인공도 피해를 받지 않는 맵
+    GRADE_OBJECT = 4, // 결계석, 광석·약초 덩이, 책장, 상자: 칠 때마다 떨구는 채집 대상. 전투가 아니라 원본 그대로 친다
     MON_DYING = 5, MON_DEAD = 7, CMD_DEAD = 100,
     H_CLASS = 0xb1, H_MP = 0x114, H_MPMAX = 0x118, H_LINK = 0x11c,
 
@@ -68,7 +79,7 @@ enum {
     EM_RECORD_TAIL = 0x30 + 5 * 10,
 
     TICK_MS = 40,               // 원본 기본 25fps(0x1592a4)
-    MAX_ENEMIES = 3, MAX_PARTY = 4, MAX_ACTORS = MAX_ENEMIES + MAX_PARTY,
+    MAX_ENEMIES = 5, MAX_PARTY = 4, MAX_ACTORS = MAX_ENEMIES + MAX_PARTY,
     GROUP_RANGE = 72,           // 정한 값: 닿은 몬스터에서 이 거리 안의 몬스터가 같이 싸운다
     COOLDOWN_MS = 2500,         // 정한 값: 전투가 끝난 뒤 다시 마주치지 않는 시간
     SKILL_MP = 15,              // 정한 값
@@ -85,6 +96,7 @@ typedef struct {
     int hp, hpmax, mp, mpmax, atk, pdef, mdef, level, speed, race;
     uint32_t mon;          // 적이면 게임 몬스터 개체
     bool boss;
+    int dealt;             // 적이 이번 전투에서 받은 피해 합(끝날 때 원본 피해 함수로 넘긴다)
     ts_sprite spr;
     ts_c0 c0;
     bool has_c0;
@@ -110,6 +122,7 @@ static struct {
     char msg[64];
     int msg_ticks;
     bool won, lost, fled, first_strike, ambushed;
+    int boss_fled;         // 도주 문턱을 넘은 보스 번호 + 1
     uint64_t last_tick;
     int popup_actor, popup_value, popup_ticks;
 } B;
@@ -142,20 +155,31 @@ static bool monster_fightable(uint32_t m) {
     int st = R8(m + E_STATE);
     if (st == MON_DYING || st == MON_DEAD) return false;
     int grade = R8(m + E_GRADE);
-    return grade < 4; // 4·5·6은 특수 개체(에너지 등). 0은 보스
+    return grade != GRADE_OBJECT && grade != 6; // 0은 보스, 5는 에너지·자폭병(닿으면 터진다), 6은 쓰는 곳이 없다
 }
 
-static uint32_t monster_at(int i) {
+static uint32_t list_at(int got_off, int i) {
     cpu_t *c = &cpu;
-    uint32_t list = got(GOT_MONSTERS);
-    return R32(list + 4 * (uint32_t)i);
+    return R32(got(got_off) + 4 * (uint32_t)i);
 }
 
-static int monster_count(void) {
+static int list_count(int got_off) {
     cpu_t *c = &cpu;
-    int n = (int)R32(got(GOT_MONSTERS) + MONSTER_COUNT);
+    int n = (int)R32(got(got_off) + MONSTER_COUNT);
     return n < 0 ? 0 : n > MONSTER_SLOTS ? MONSTER_SLOTS : n;
 }
+
+static uint32_t monster_at(int i) { return list_at(GOT_MONSTERS, i); }
+static int monster_count(void) { return list_count(GOT_MONSTERS); }
+
+static bool practice_map(void) {
+    cpu_t *c = &cpu;
+    int map = S32(got(GOT_STAGE) + STAGE_MAP);
+    return map == MAP_PRACTICE_A || map == MAP_PRACTICE_B;
+}
+
+// 지금 맵에서 같이 싸울 수 있는 몬스터. 보스는 맵을 옮겨 다니므로 원본 판정(0x14b460)을 쓴다.
+static bool monster_here(uint32_t m) { return monster_fightable(m) && CALL(FN_ON_MAP, m); }
 
 typedef struct { bool ok; int ems, img[3], pal[3], c0; } em_look;
 
@@ -219,6 +243,7 @@ static void add_enemy(uint32_t m) {
     a->level = S8(m + E_LEVEL);
     a->race = R8(m + E_RACE);
     a->boss = R8(m + E_GRADE) == 0;
+    a->dealt = 0;
     a->speed = 8 + a->level / 2; // 정한 값
     a->alpha = 255;
     load_em_sprite(a, S16(m + E_EMD));
@@ -280,7 +305,7 @@ static void place(void) {
             a->home_y = 84 + np * 32;
             np++;
         } else {
-            static const int ox[MAX_ENEMIES] = {0, -36, -36}, oy[MAX_ENEMIES] = {0, -36, 36};
+            static const int ox[MAX_ENEMIES] = {0, -36, -36, -72, -72}, oy[MAX_ENEMIES] = {0, -36, 36, -18, 54};
             a->home_x = W * 30 / 100 + ox[ne];
             a->home_y = 140 + oy[ne];
             ne++;
@@ -330,11 +355,19 @@ static void open_battle(uint32_t first, int kind) {
         }
     }
     B.n = 0;
+    B.boss_fled = 0;
     add_enemy(first);
-    int fx = S32(first + E_X), fy = S32(first + E_Y), map = S16(first + E_MAP);
+    // 소환수를 부른 몬스터는 소환수가 다 죽을 때까지 무적이다(+0x295). 소환수를 먼저 모두 넣는다.
+    for (int i = 0; i < list_count(GOT_SUMMONS) && B.n < MAX_ENEMIES; i++) {
+        uint32_t m = list_at(GOT_SUMMONS, i);
+        if (m != first && monster_here(m)) add_enemy(m);
+    }
+    int fx = S32(first + E_X), fy = S32(first + E_Y);
     for (int i = 0; i < monster_count() && B.n < MAX_ENEMIES; i++) {
         uint32_t m = monster_at(i);
-        if (m == first || !monster_fightable(m) || S16(m + E_MAP) != map) continue;
+        bool dup = false;
+        for (int k = 0; k < B.n; k++) dup |= B.a[k].mon == m;
+        if (dup || !monster_here(m)) continue;
         if (abs(S32(m + E_X) - fx) <= GROUP_RANGE && abs(S32(m + E_Y) - fy) <= GROUP_RANGE) add_enemy(m);
     }
     add_hero();
@@ -592,7 +625,20 @@ static int damage_to_party(actor *from, actor *to) {
     return dmg < 1 ? 1 : dmg;
 }
 
+// 원본 0x14b1a8, 0x14b208과 같은 문턱. 넘으면 전투를 끝내고 필드에서 원본이 도주시킨다.
+static bool boss_escapes(const actor *a) {
+    cpu_t *c = &cpu;
+    uint32_t m = a->mon;
+    if (!a->boss || !a->alive || S8(m + E_RUN_TICKS) > 0) return false;
+    int pct = S8(m + E_ESC_CUM_PCT);
+    if (pct > 0 && abs(S32(m + E_ESC_CUM) - a->dealt) >= a->hpmax * pct / 100) return true;
+    pct = S8(m + E_ESC_HP_PCT);
+    return pct > 0 && !R8(m + E_ESC_HP_DONE) && a->hp <= a->hpmax * pct / 100;
+}
+
 static void hit(actor *to, int dmg) {
+    if (dmg > to->hp) dmg = to->hp;
+    if (!to->party) to->dealt += dmg;
     to->hp -= dmg;
     if (to->hp < 0) to->hp = 0;
     B.popup_actor = (int)(to - B.a);
@@ -600,6 +646,7 @@ static void hit(actor *to, int dmg) {
     B.popup_ticks = 20;
     set_pose(to, to->hp > 0 ? P_HIT : P_DEAD);
     if (to->hp <= 0) to->alive = false;
+    if (!B.boss_fled && boss_escapes(to)) B.boss_fled = (int)(to - B.a) + 1;
 }
 
 static void begin_action(int actor_i, action act, int target) {
@@ -622,6 +669,15 @@ static void enemy_turn(int i) {
 }
 
 static void next_turn(void) {
+    if (B.boss_fled) {
+        char msg[64];
+        snprintf(msg, sizeof msg, "%s " T_BOSS_FLED, B.a[B.boss_fled - 1].name);
+        set_message(msg, 40);
+        B.fled = true;
+        B.phase = S_END;
+        B.step_tick = 0;
+        return;
+    }
     if (!alive_count(false)) { B.won = true; set_message(T_WIN, 40); B.phase = S_END; B.step_tick = 0; return; }
     if (!alive_count(true)) { B.lost = true; set_message(T_LOSE, 50); B.phase = S_END; B.step_tick = 0; return; }
     for (;;) {
@@ -699,39 +755,51 @@ static void act_tick(void) {
     }
 }
 
+// 적에게 준 피해를 원본 피해 함수로 넘긴다. 다 죽였으면 원래 죽음 → 보상(경험치, 드랍, 퀘스트 처치 수) → 처치 동작으로 이어지고,
+// 살아 있으면 남은 HP와 보스 도주 문턱(누적 피해)이 원본 계산 그대로 반영된다.
+static void settle_enemy(actor *a) {
+    cpu_t *c = &cpu;
+    uint32_t m = a->mon;
+    if (!m || !a->dealt) return;
+    if (!a->alive) {
+        // 소환수 보호(+0x295)와 도주 동작은 원본에서 피해를 막는다. 전투 안에서 이미 이겼으므로 푼다.
+        W8(m + E_INVULN, 0);
+        W8(m + E_INVULN2, 0);
+        W8(m + E_RUN_TICKS, 0);
+        if (CALL(FN_ESCAPING3, m) || CALL(FN_ESCAPING4, m)) CALL(FN_END_ESCAPE, m, 1);
+        int hp = S32(m + E_HP);
+        CALL(FN_DAMAGE, m, (uint32_t)-(hp > 0 ? hp : 1), 0);
+        if (S32(m + E_HP) > 0) fprintf(stderr, "[turn] 원본이 피해를 막음: 몬스터 %s HP %d\n", a->name, S32(m + E_HP));
+    } else {
+        CALL(FN_DAMAGE, m, (uint32_t)-a->dealt, 0);
+    }
+}
+
 static void finish(void) {
     cpu_t *c = &cpu;
     uint32_t hero = CALL(FN_HERO);
+    // 소환수부터 정리해야 소환한 몬스터의 보호가 원본에서도 풀린다.
+    for (int pass = 0; pass < 2; pass++)
+        for (int i = 0; i < B.n; i++) {
+            actor *a = &B.a[i];
+            if (!a->party && (R8(a->mon + E_SUMMONED) != 0) == (pass == 0)) settle_enemy(a);
+        }
     for (int i = 0; i < B.n; i++) {
         actor *a = &B.a[i];
+        // 전멸하면 HP 0으로 돌려보낸다. 다음 프레임에 원본 주인공 갱신(0x132510)이 쓰러짐(0x140dbc)으로 넘긴다.
         if (a->hero) {
-            W32s(hero + E_HP, a->hp > 0 ? a->hp : 1); // 시제품: 전멸해도 HP 1로 필드에 돌아간다(게임 오버는 다음 단계)
+            W32s(hero + E_HP, a->hp > 0 ? a->hp : 0);
             W32s(hero + H_MP, a->mp);
-        }
-        if (!a->party && B.won) {
-            uint32_t m = a->mon;
-            // 원본 피해 경로로 죽인다. 필드로 돌아가면 죽는 동작 → 0x14aa54 보상 → 동작 7로 이어진다.
-            int hp = S32(m + E_HP);
-            CALL(FN_DAMAGE, m, (uint32_t)-(hp > 0 ? hp : 1), 0);
-            if (S32(m + E_HP) > 0) { // 피해를 무시하는 맵(0x1750f0) 등: 바로 처치
-                W32s(m + E_HP, 0);
-                CALL(FN_REWARD, m);
-                CALL(FN_SET_CMD, m, CMD_DEAD, R8(m + E_DIR), 0);
-                CALL(FN_APPLY_CMD, m);
-            }
-        } else if (!a->party && a->mon) {
-            W32s(a->mon + E_HP, a->hp > 0 ? a->hp : 1);
         }
         ts_sprite_free(&a->spr);
     }
-    fprintf(stderr, "[turn] 전투 끝: %s\n", B.won ? "승리" : B.fled ? "도망" : "전멸");
+    fprintf(stderr, "[turn] 전투 끝: %s\n", B.won ? "승리" : B.boss_fled ? "보스 도주" : B.fled ? "도망" : "전멸");
     B.phase = S_CLOSED;
     B.n = 0;
     cooldown_until = now_ms() + COOLDOWN_MS;
     check_at = now_ms() + 2000;
     check_mon = B.won ? B.a[0].mon : 0;
     check_exp = S32(hero + 0xf4);
-    // 열 때의 화면으로 돌려 둔다(다음 프레임에 게임이 다시 그린다)
 }
 
 static void step(void) {
@@ -759,6 +827,7 @@ static void step(void) {
 }
 
 void turn_battle_tick(void) {
+    turn_test_tick();
     if (pending_monster && B.phase == S_CLOSED) {
         uint32_t m = pending_monster;
         pending_monster = 0;
@@ -829,14 +898,21 @@ bool turn_battle_key(int type, int code) {
 
 // ---- 게임 훅 ----
 
+// 턴제를 쓰는 곳. 연습 맵(몬스터가 죽지 않음)은 원본 실시간 그대로 둔다.
+static bool turn_here(void) { return turn_enabled() && !practice_map(); }
+
+// 원본 그대로 치고 맞는 개체(채집 대상)
+static bool original_target(uint32_t m) { cpu_t *c = &cpu; return R8(m + E_GRADE) == GRADE_OBJECT || R8(m + E_GRADE) == 6; }
+
 static bool can_start(uint32_t m) {
-    return turn_enabled() && B.phase == S_CLOSED && !pending_monster && now_ms() >= cooldown_until && monster_fightable(m);
+    if (!turn_here() || B.phase != S_CLOSED || pending_monster || now_ms() < cooldown_until) return false;
+    return monster_fightable(m) && CALL(FN_ATTACKABLE, m);
 }
 
 // 몬스터 갱신 1단계. 전투가 잡혔거나 열려 있으면 몬스터를 멈춘다. 몸이 닿으면 전투를 잡는다.
 void f_48bfc(cpu_t *c) {
     uint32_t m = c->r[0];
-    if (turn_enabled() && (pending_monster || B.phase != S_CLOSED)) return;
+    if (turn_here() && (pending_monster || B.phase != S_CLOSED)) return;
     if (can_start(m) && CALL(FN_CONTACT, m, 0)) {
         pending_monster = m;
         pending_kind = 0;
@@ -849,7 +925,7 @@ void f_48bfc(cpu_t *c) {
 // 몬스터 → 주인공 공격. 턴제에서는 피해 대신 기습 전투가 된다.
 void f_4de84(cpu_t *c) {
     uint32_t m = c->r[0];
-    if (turn_enabled()) {
+    if (turn_here() && !original_target(m)) {
         if (can_start(m)) { pending_monster = m; pending_kind = 1; }
         c->r[0] = 0;
         return;
@@ -860,7 +936,7 @@ void f_4de84(cpu_t *c) {
 // 주인공 → 몬스터 타격. 턴제에서는 피해 대신 선제 공격 전투가 된다.
 void f_35a04(cpu_t *c) {
     uint32_t m = c->r[0];
-    if (turn_enabled()) {
+    if (turn_here() && !original_target(m)) {
         if (can_start(m)) { pending_monster = m; pending_kind = 2; }
         c->r[0] = (uint32_t)-1;
         return;
@@ -868,19 +944,31 @@ void f_35a04(cpu_t *c) {
     orig_f_35a04(c);
 }
 
-// 시험용 제어 명령(main.c ctrl_poll): "turn nearest"는 가장 가까운 몬스터와 전투를 연다.
+// 시험용 제어 명령(main.c ctrl_poll): "turn nearest"는 가장 가까운 몬스터, "turn boss"는 이 맵의 보스, "turn win"은 열린 전투를 바로 이긴다.
 bool turn_ctrl(const char *line) {
     if (strncmp(line, "turn ", 5)) return false;
+    if (turn_test_ctrl(line + 5)) return true;
+    bool win = !strcmp(line + 5, "win"), lose = !strcmp(line + 5, "lose");
+    if ((win || lose) && (B.phase == S_COMMAND || B.phase == S_TARGET)) { // 시험: 적(또는 아군)을 모두 쓰러뜨린다
+        for (int i = 0; i < B.n; i++) if (B.a[i].party == lose && B.a[i].alive) hit(&B.a[i], B.a[i].hp);
+        next_turn();
+        return true;
+    }
     if (!strcmp(line + 5, "nearest") && B.phase == S_CLOSED) {
         uint32_t hero = CALL(FN_HERO), best = 0;
         int bd = 1 << 30;
         for (int i = 0; i < monster_count(); i++) {
             uint32_t m = monster_at(i);
-            if (!monster_fightable(m)) continue;
+            if (!monster_here(m)) continue;
             int d = abs(S32(m + E_X) - S32(hero + E_X)) + abs(S32(m + E_Y) - S32(hero + E_Y));
             if (d < bd) { bd = d; best = m; }
         }
         if (best) { pending_monster = best; pending_kind = 0; }
+    } else if (!strcmp(line + 5, "boss") && B.phase == S_CLOSED) { // 이 맵의 보스와 전투
+        cpu_t *c = &cpu;
+        uint32_t boss = R32(got(GOT_STAGE));
+        fprintf(stderr, "[turn] 보스 %08x\n", boss);
+        if (boss && monster_here(boss)) { pending_monster = boss; pending_kind = 0; }
     }
     return true;
 }

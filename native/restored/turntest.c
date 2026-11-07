@@ -1,0 +1,136 @@
+// 턴제 모드 시험 도구. 제어 파일(--ctrl) 명령으로만 쓴다.
+//   turn quest N  메인 퀘스트 N 장면의 시작 상태(스토리 값, 맵, 위치)를 일반 플레이에 적용하고 그 장면 스크립트를 띄운다.
+//                 시작 상태는 스토리 다시보기와 같다(본 장면은 기록, 아니면 정적 분석 값). 레벨, 소지품, 동료 수치는 그대로다.
+//   turn quests   스토리 값(+0x7b4)에서 0이 아닌 것을 출력한다.
+//   turn warp M X Y  맵 M의 칸 (X, Y)로 옮긴다.
+//   turn spawnboss EMD [here]  이 지역 보스를 EMD로 정해 원본 생성 함수로 만든다. here면 주인공 옆에 둔다.
+//   turn flag N V, turn qset N V  스토리 값 하나를 바꾼다(+0x6b4, +0x7b4).
+//   turn mons     몬스터 목록과 보스 슬롯을 출력한다.
+#include "restored.h"
+#include "turn.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+enum {
+    SCRIPT = 0x1a2618,
+    SCRIPT_RUNNING = SCRIPT + 0x328,
+    SCRIPT_WARPING = SCRIPT + 0x6a0,
+    SCRIPT_RELOAD = SCRIPT + 0x6a1,
+    SCRIPT_TO_FIELD = SCRIPT + 0x6a2,
+    SCRIPT_FLAGS = SCRIPT + 0x6b4,
+    SCRIPT_QUESTS = SCRIPT + 0x7b4,
+    GOT_LOADING = 0xa48,
+    GOT_WORLD = 0x13c,
+    WORLD_MAP = 0x2d4,
+    FN_SCRIPT_RUN = 0x119ce4,
+    FN_SCRIPT_END = 0x119e30,
+    FN_WARP = 0x11b4f8,
+};
+
+static int jump_main = -1, jump_map;
+static int warp_to[3];
+static bool warp_pending;
+static uint64_t jump_since;
+
+static bool busy(void) {
+    cpu_t *c = &cpu;
+    return R8(got(GOT_LOADING)) || R8(SCRIPT_RUNNING) || R8(SCRIPT_WARPING) || R8(SCRIPT_RELOAD) || R8(SCRIPT_TO_FIELD);
+}
+
+static void jump(int key) {
+    cpu_t *c = &cpu;
+    int map, x, y, main, dir, time;
+    uint8_t flags[256], quests[256];
+    if (!replay_scene_start(key, &map, &x, &y, &main, &dir, &time, flags, quests)) return;
+    CALL(FN_SCRIPT_END);
+    // 지금 세이브에서 이미 켜진 값은 두고, 장면 시작 상태에서 켜진 값을 더한다(퀘스트 값은 장면 값으로 맞춘다).
+    for (int i = 0; i < 256; i++) {
+        if (flags[i]) W8(SCRIPT_FLAGS + i, flags[i]);
+        W8(SCRIPT_QUESTS + i, quests[i]);
+    }
+    uint32_t args[5] = {(uint32_t)map, (uint32_t)(x >> 4), (uint32_t)(y >> 4), (uint32_t)dir, (uint32_t)time};
+    guest_call(FN_WARP, args, 5);
+    jump_main = main;
+    jump_map = map;
+    jump_since = now_ms();
+    fprintf(stderr, "[turn] 퀘스트 %d 장면으로: 맵 %d (%d,%d) 메인 %d\n", key, map, x, y, main);
+}
+
+// 맵을 읽고 입장 스크립트가 끝나면 장면 스크립트를 띄운다(메인 0은 입장 스크립트 자체다).
+void turn_test_tick(void) {
+    if (turn_battle_open()) return; // 전투 중에 맵을 옮기면 전투의 몬스터 포인터가 바뀐다
+    if (warp_pending) {
+        cpu_t *c = &cpu;
+        if (busy()) return;
+        warp_pending = false;
+        uint32_t args[5] = {(uint32_t)warp_to[0], (uint32_t)warp_to[1], (uint32_t)warp_to[2], 1, 0xff};
+        guest_call(FN_WARP, args, 5);
+        return;
+    }
+    if (jump_main < 0) return;
+    cpu_t *c = &cpu;
+    if (now_ms() - jump_since < 300 || busy()) return;
+    if ((int)R32(got(GOT_WORLD) + WORLD_MAP) != jump_map) { jump_main = -1; return; }
+    if (jump_main) CALL(FN_SCRIPT_RUN, jump_main);
+    jump_main = -1;
+}
+
+bool turn_test_ctrl(const char *cmd) {
+    cpu_t *c = &cpu;
+    if (!strncmp(cmd, "quest ", 6)) { jump(atoi(cmd + 6)); return true; }
+    if (!strncmp(cmd, "warp ", 5)) { // turn warp 맵 칸x 칸y
+        sscanf(cmd + 5, "%d %d %d", &warp_to[0], &warp_to[1], &warp_to[2]);
+        warp_pending = true; // 장면이나 안내 창 도중에 옮기면 원본이 멈춘다. 스크립트가 끝난 뒤에 옮긴다
+        return true;
+    }
+    if (!strncmp(cmd, "spawnboss ", 10)) { // turn spawnboss EMD: 지역 보스 기록을 바꾸고 원본 보스 생성(0x140a64)을 부른다
+        W16(got(0x194), (uint16_t)atoi(cmd + 10));
+        W8(got(0x194) + 0xc, 0);
+        CALL(0x140a64, 0);
+        uint32_t b = R32(got(0x13c));
+        if (b && strstr(cmd, " here")) { // 시험: 지금 맵의 주인공 옆으로 옮긴다
+            uint32_t h = CALL(0x147434);
+            W16(b + 0x194, (uint16_t)R32(got(GOT_WORLD) + WORLD_MAP));
+            W32(b + 8, R32(h + 8) - 48);
+            W32(b + 0xc, R32(h + 0xc));
+        }
+        if (b) fprintf(stderr, "[turn] 보스 생성 %08x 맵 %d 위치 %d,%d HP %d\n", b, (int16_t)R16(b + 0x194), (int)R32(b + 8), (int)R32(b + 0xc), (int)R32(b + 0xec));
+        return true;
+    }
+    if (!strncmp(cmd, "flag ", 5) || !strncmp(cmd, "qset ", 5)) { // turn flag N V(+0x6b4), turn qset N V(+0x7b4)
+        int n = 0, v = 0;
+        sscanf(cmd + 5, "%d %d", &n, &v);
+        W8((cmd[0] == 'f' ? SCRIPT_FLAGS : SCRIPT_QUESTS) + (n & 255), v);
+        return true;
+    }
+    if (!strncmp(cmd, "objective ", 10)) { // turn objective 퀘스트 EMD 수: 스크립트 명령 0x20과 같은 처치 목표 등록(0x128b64)
+        int q = 0, mon = 0, n = 1;
+        sscanf(cmd + 10, "%d %d %d", &q, &mon, &n);
+        CALL(0x128b64, q, R32(SCRIPT), 99, mon, n);
+        return true;
+    }
+    if (!strcmp(cmd, "areas")) { // 지역 표(*(GOT 0x16bc)) +0xc0 보스 id, +0xd4 확률
+        uint32_t t = got(0x16bc);
+        fprintf(stderr, "[turn] 지역 표 %08x 지금 지역 %d:", t, (int)R32(got(0x18c) + 0x138));
+        for (int i = 0; t && i < 10; i++) fprintf(stderr, " [%d] %d/%d%%", i, (int16_t)R16(t + 0xc0 + 2 * i), R8(t + 0xd4 + i));
+        fprintf(stderr, "\n");
+        return true;
+    }
+    if (!strcmp(cmd, "mons")) { // 지금 몬스터 목록과 보스 슬롯
+        uint32_t list = got(0x20), n = R32(list + 0xc8);
+        for (uint32_t i = 0; i < n && i < 50; i++) {
+            uint32_t m = R32(list + 4 * i);
+            if (!m) continue;
+            fprintf(stderr, "[turn] 몬스터 %u: %s EMD %d 등급 %d 맵 %d 위치 %d,%d HP %d 상태 %d\n", i, gstr(m + 0xd0), (int16_t)R16(m + 0xa8), R8(m + 0xb1), (int16_t)R16(m + 0x194), (int)R32(m + 8), (int)R32(m + 0xc), (int)R32(m + 0xec), R8(m + 0xac));
+        }
+        fprintf(stderr, "[turn] 보스 슬롯 %08x, 지역 보스 %d\n", R32(got(0x13c)), (int16_t)R16(got(0x194)));
+        return true;
+    }
+    if (!strcmp(cmd, "quests")) {
+        fprintf(stderr, "[turn] 퀘스트:");
+        for (int i = 0; i < 256; i++) if (R8(SCRIPT_QUESTS + i)) fprintf(stderr, " %d=%d", i, R8(SCRIPT_QUESTS + i));
+        fprintf(stderr, "\n[turn] 맵 %d\n", (int)R32(got(GOT_WORLD) + WORLD_MAP));
+        return true;
+    }
+    return false;
+}

@@ -264,6 +264,20 @@ static void fill_estimated(int key) {
     for (int i = 0; i < st->flag_n; i++) s->flags[st->flags[i][0]] = st->flags[i][1];
 }
 
+// 턴제 모드 시험(turntest.c): 장면의 시작 상태. 실제로 본 장면은 기록을, 아니면 정적 분석 값을 준다.
+bool replay_scene_start(int key, int *map, int *x, int *y, int *main, int *dir, int *time, uint8_t flags[256], uint8_t quests[256]) {
+    if (key < 0 || key >= SCENE_COUNT) return false;
+    load_file();
+    scene_t saved = scenes[key];
+    if (!saved.unlocked) fill_estimated(key);
+    const scene_t *s = &scenes[key];
+    *map = s->map; *x = s->x; *y = s->y; *main = s->main; *dir = s->dir; *time = s->time;
+    memcpy(flags, s->flags, 256);
+    memcpy(quests, s->quests, 256);
+    scenes[key] = saved;
+    return true;
+}
+
 static void unlock_from_save(void) {
     static uint8_t data[SAVE_MAIN_BYTES];
     if (savefile_read_plain("MAINGAMEDATA", data, sizeof data) != SAVE_MAIN_BYTES) return;
