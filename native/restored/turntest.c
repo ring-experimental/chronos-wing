@@ -6,6 +6,8 @@
 //   turn spawnboss EMD [here]  이 지역 보스를 EMD로 정해 원본 생성 함수로 만든다. here면 주인공 옆에 둔다.
 //   turn flag N V, turn qset N V  스토리 값 하나를 바꾼다(+0x6b4, +0x7b4).
 //   turn mons     몬스터 목록과 보스 슬롯을 출력한다.
+//   turn auto ok|win|off  대사를 확인 키로 넘긴다(ok), 열린 전투를 바로 이긴다(win).
+//   turn run N    지금 맵의 메인 N을 돌린다. turn st  상태 한 줄. turn give 종류 id 수  아이템 지급. turn peek 주소 길이
 #include "restored.h"
 #include "turn.h"
 #include <stdio.h>
@@ -31,6 +33,10 @@ static int jump_main = -1, jump_map;
 static int warp_to[3];
 static bool warp_pending;
 static uint64_t jump_since;
+static bool auto_ok, auto_win;
+static int run_main = -1;
+static uint64_t ok_at;
+void host_key(int type, int code);
 
 static bool busy(void) {
     cpu_t *c = &cpu;
@@ -58,7 +64,21 @@ static void jump(int key) {
 
 // 맵을 읽고 입장 스크립트가 끝나면 장면 스크립트를 띄운다(메인 0은 입장 스크립트 자체다).
 void turn_test_tick(void) {
+    uint64_t t = now_ms();
+    if (auto_ok && t - ok_at > 250) { // 시험: 대사와 전투 메시지를 확인 키로 넘긴다
+        cpu_t *c = &cpu;
+        if ((turn_battle_open() || R8(SCRIPT_RUNNING)) && !R8(got(GOT_LOADING))) { ok_at = t; host_key(2, -5); host_key(3, -5); }
+    }
+    if (auto_win && turn_battle_open()) turn_ctrl("turn win");
     if (turn_battle_open()) return; // 전투 중에 맵을 옮기면 전투의 몬스터 포인터가 바뀐다
+    if (run_main >= 0) {
+        cpu_t *c = &cpu;
+        if (busy()) return;
+        fprintf(stderr, "[turn] 메인 %d 실행 (맵 %d)\n", run_main, (int)R32(got(GOT_WORLD) + WORLD_MAP));
+        CALL(FN_SCRIPT_RUN, run_main);
+        run_main = -1;
+        return;
+    }
     if (warp_pending) {
         cpu_t *c = &cpu;
         if (busy()) return;
@@ -77,6 +97,49 @@ void turn_test_tick(void) {
 
 bool turn_test_ctrl(const char *cmd) {
     cpu_t *c = &cpu;
+    if (!strncmp(cmd, "auto", 4)) { auto_ok = strstr(cmd, "ok") != NULL; auto_win = strstr(cmd, "win") != NULL; return true; }
+    if (!strncmp(cmd, "run ", 4)) { run_main = atoi(cmd + 4); return true; } // 지금 맵의 메인 N을 원본 조건 그대로 돌린다(접촉, 대화와 같다)
+    if (!strncmp(cmd, "give ", 5)) { // turn give 종류 id 수: 스크립트 명령 0x13과 같은 아이템 지급(0x13ad9c)
+        int k = 0, id = 0, n = 1;
+        sscanf(cmd + 5, "%d %d %d", &k, &id, &n);
+        uint32_t r = CALL(0x13ad9c, CALL(0x128f0c), k, id, n);
+        fprintf(stderr, "[turn] 지급 %d/%d x%d -> %u\n", k, id, n, r);
+        return true;
+    }
+    if (!strncmp(cmd, "count ", 6)) { // turn count 종류 id: 조건 2와 같은 가방 수량(0x12b4d0)
+        int k = 0, id = 0;
+        sscanf(cmd + 6, "%d %d", &k, &id);
+        fprintf(stderr, "[turn] 가방 %d/%d = %d\n", k, id, (int)CALL(0x12b4d0, 0, k, id));
+        return true;
+    }
+    if (!strcmp(cmd, "ents")) { // 엔티티 목록(*(GOT 0x14)): 종류, 위치. 바닥 드랍 확인용
+        uint32_t l = got(0x14), n = R32(l);
+        for (int i = 0; n && i < 200; i++, n = R32(n + 4)) {
+            uint32_t e = R32(n + 0x10);
+            if (e) fprintf(stderr, "[ent] 종류 %d %08x 위치 %d,%d\n", (int8_t)R8(n + 0x14), e, (int)R32(e + 8), (int)R32(e + 0xc));
+        }
+        return true;
+    }
+    if (!strncmp(cmd, "peek ", 5)) { // turn peek 주소 길이(16진). gNN이면 GOT+NN이 가리키는 값부터
+        const char *a = cmd + 5;
+        uint32_t addr = a[0] == 'g' ? got((uint32_t)strtoul(a + 1, NULL, 16)) : (uint32_t)strtoul(a, NULL, 16);
+        uint32_t n = (uint32_t)strtoul(strchr(a, ' ') ? strchr(a, ' ') + 1 : "40", NULL, 16);
+        fprintf(stderr, "[peek] %08x:", addr);
+        for (uint32_t i = 0; i < n; i++) fprintf(stderr, "%s%02x", i % 16 ? " " : "\n[peek] ", R8(addr + i));
+        fprintf(stderr, "\n");
+        return true;
+    }
+    if (!strcmp(cmd, "st")) { // 상태 한 줄: 맵, 주인공 칸, 바쁨, 전투, 퀘스트(메인 0~34)
+        uint32_t h = CALL(0x147434);
+        fprintf(stderr, "[st] 맵 %d 칸 %d,%d busy %d run %d battle %d hp %d Q", (int)R32(got(GOT_WORLD) + WORLD_MAP), (int)R32(h + 8) >> 4, (int)R32(h + 0xc) >> 4, busy(), R8(SCRIPT_RUNNING), turn_battle_open(), (int)R32(h + 0xec));
+        for (int i = 0; i <= 34; i++) fprintf(stderr, "%d", R8(SCRIPT_QUESTS + i));
+        fprintf(stderr, " q:");
+        for (int i = 35; i < 256; i++) if (R8(SCRIPT_QUESTS + i)) fprintf(stderr, " %d=%d", i, R8(SCRIPT_QUESTS + i));
+        fprintf(stderr, " F:");
+        for (int i = 0; i < 256; i++) if (R8(SCRIPT_FLAGS + i)) fprintf(stderr, " %d", i);
+        fprintf(stderr, "\n");
+        return true;
+    }
     if (!strncmp(cmd, "quest ", 6)) { jump(atoi(cmd + 6)); return true; }
     if (!strncmp(cmd, "warp ", 5)) { // turn warp 맵 칸x 칸y
         sscanf(cmd + 5, "%d %d %d", &warp_to[0], &warp_to[1], &warp_to[2]);
