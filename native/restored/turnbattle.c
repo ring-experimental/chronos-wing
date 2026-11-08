@@ -67,7 +67,7 @@ enum {
     FN_LOAD_EMS = 0x14efb8,   // (몬스터) +0xaa 묶음과 효과 표를 +0x38 그림에 싣는다
     FN_LOAD_SHEETS = 0x14f040, // (몬스터) +0x10c 그림 3장, +0x112 팔레트 3개
     FN_NUM_INIT = 0x118420, FN_NUM_DRAW = 0x118528, FN_NUM_STEP = 0x1184bc,
-    SPR_HIT_X = 0, SPR_HIT_Y = 4, SPR_TINT = 0x60, SPR_ANIMS = 0x3c, SPR_ANIM_TABLE = 0x44,
+    SPR_FRAME = 0x6a, SPR_HIT_X = 0, SPR_HIT_Y = 4, SPR_TINT = 0x60, SPR_ANIMS = 0x3c, SPR_ANIM_TABLE = 0x44,
     FN_DRAW_LINE = 0x12c50c,
     FN_SET_COLOR = 0x12d734,
 
@@ -86,7 +86,7 @@ enum {
     GRADE_KAMIKAZE = 5, // 에너지·자폭병: 원본은 닿으면 터진다(0x148e44). 턴제에서는 1턴 지난 다음 차례에 터진다
     E_STUN_PCT = 0x124, // 원본 경직 문턱(0x14b0e0): 누적 피해 ≥ 최대 HP × 이 값%
     GRADE_OBJECT = 4, // 결계석, 광석·약초 덩이, 책장, 상자: 칠 때마다 떨구는 채집 대상. 전투가 아니라 원본 그대로 친다
-    MON_DYING = 5, MON_DEAD = 7, CMD_DEAD = 100,
+    CMD_EXPLODE = 2, E_CMD = 0xad, MON_DYING = 5, MON_DEAD = 7, CMD_DEAD = 100,
     H_CLASS = 0xb1, H_MP = 0x114, H_MPMAX = 0x118, H_LINK = 0x11c,
 
     MEMBERS = 0x1a9e58, MEMBER_SIZE = 0x74, MEMBER_NAME = 4, MEMBER_LEVEL = 0x35, MEMBER_EMD = 0x48, MEMBER_COUNT = 8,
@@ -158,6 +158,10 @@ static struct {
 static uint32_t pending_monster;
 static int pending_kind; // 0 접촉, 1 몬스터 공격, 2 주인공 공격
 static uint64_t cooldown_until, check_at;
+// 전투에서 이미 터진 자폭 몬스터. 정산(0x14ad54)이 필드에 폭발 명령 2를 주므로 그 동작을 마지막 프레임으로 넘겨
+// 바로 끝(0x1495f8 → 0x14ab54 드랍)으로 가게 한다. 폭발을 두 번 보이지 않게 하려는 것이다.
+static uint32_t blown[MAX_ENEMIES];
+static uint64_t blown_until;
 static uint32_t check_mon;
 static int check_exp;
 static int enabled = -1;
@@ -544,8 +548,10 @@ static int pose_state(const actor *a, pose p) {
     switch (p) {
     case P_IDLE: return 0;
     case P_WALK: return 1;
-    case P_HIT: return 2;
-    case P_DEAD: return 3;
+    // 자폭 몬스터(등급 5)는 상태 2가 폭발이다: 원본은 죽을 때 명령 2를 주고(0x14a9f4) 그 동작이 끝나면 지운다(0x1495f8 → 0x14ab54).
+    // 그래서 맞을 때는 대기 동작을 쓰고, 죽을 때(스스로 터지거나 맞아 죽거나) 상태 2를 끝까지 재생한다.
+    case P_HIT: return a->kamikaze ? 0 : 2;
+    case P_DEAD: return a->kamikaze ? 2 : 3;
     default: return a->boss ? 9 : 7; // 공격 번호 = 상태 - 7(보스 - 9), 0x148980
     }
 }
@@ -578,9 +584,10 @@ static int obj_frames(const actor *a, int anim, int *dir) {
     return n;
 }
 
-// 방향 0~3: 2가 오른쪽, 3은 2의 좌우 반전(왼쪽). 적은 오른쪽, 아군은 왼쪽을 본다.
+// 방향 0~3: 0 위, 1 아래, 2 왼쪽, 3 오른쪽(2의 좌우 반전). 필드에서 왼쪽 키 → +0xae 2, 오른쪽 키 → 3으로 확인.
+// 적(왼쪽 자리)은 오른쪽, 아군(오른쪽 자리)은 왼쪽을 본다.
 static void pose_anim(const actor *a, int *anim, int *dir) {
-    int face = a->party ? 3 : 2;
+    int face = a->party ? 2 : 3;
     if (a->hero) {
         *anim = hero_anim(a->pose);
         if (*anim >= obj_anims(a)) *anim = 9;
@@ -604,7 +611,7 @@ static void pose_anim(const actor *a, int *anim, int *dir) {
 // 높이 +200), 주인공은 0x13549c(폭 +0xc4, 높이 +200, y - 2). 동료는 필드 개체가 없어 주인공 크기를 쓴다(정한 값).
 static void draw_shadow(const actor *a) {
     cpu_t *c = &cpu;
-    if (a->alpha < 255) return;
+    if (a->alpha < 255 || (a->kamikaze && !a->alive)) return;
     if (a->party) {
         uint32_t h = CALL(FN_HERO);
         CALL(FN_SHADOW, h, a->x, a->y - 2, R32(h + E_SHADOW_W), R32(h + E_SHADOW_H));
@@ -1049,6 +1056,11 @@ static void finish(void) {
     bool killed = false;
     for (int i = 0; i < B.n; i++) killed |= !B.a[i].party && !B.a[i].alive;
     fprintf(stderr, "[turn] 전투 끝: %s\n", B.won ? "승리" : B.boss_fled ? "보스 도주" : B.fled ? "도망" : "전멸");
+    int nb = 0;
+    for (int i = 0; i < B.n; i++)
+        if (!B.a[i].party && B.a[i].kamikaze && !B.a[i].alive && nb < MAX_ENEMIES) blown[nb++] = B.a[i].mon;
+    while (nb < MAX_ENEMIES) blown[nb++] = 0;
+    blown_until = now_ms() + 1500;
     pop_clear();
     B.phase = S_CLOSED;
     B.n = 0;
@@ -1064,7 +1076,8 @@ static void step(void) {
         actor *a = &B.a[i];
         a->tick++;
         if (a->pose == P_HIT && a->tick >= pose_frames(a) + 3) set_pose(a, P_IDLE);
-        if (a->pose == P_DEAD && a->tick > pose_frames(a) + 4 && a->alpha > 0) a->alpha -= 25;
+        if (a->pose == P_DEAD && a->kamikaze && a->tick >= pose_frames(a)) a->alpha = 0; // 폭발이 끝나면 바로 지운다(0x14ab54)
+        else if (a->pose == P_DEAD && a->tick > pose_frames(a) + 4 && a->alpha > 0) a->alpha -= 25;
     }
     if (B.msg_ticks > 0) B.msg_ticks--;
     switch (B.phase) {
@@ -1085,6 +1098,12 @@ static void step(void) {
 void turn_battle_tick(void) {
     turn_test_tick();
     if (B.phase == S_CLOSED) loot_tick();
+    if (B.phase == S_CLOSED && blown_until) {
+        cpu_t *c = &cpu;
+        for (int i = 0; i < MAX_ENEMIES; i++)
+            if (blown[i] && R8(blown[i] + E_CMD) == CMD_EXPLODE) W8(blown[i] + E_SPRITE + SPR_FRAME, 0x7f); // 0x17f4e8: 마지막 ≤ +0x6a면 끝
+        if (now_ms() >= blown_until) blown_until = 0;
+    }
     if (pending_monster && B.phase == S_CLOSED) {
         uint32_t m = pending_monster;
         pending_monster = 0;
