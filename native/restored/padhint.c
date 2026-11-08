@@ -40,7 +40,15 @@ static void draw_right(uint32_t g, int right, int y, int slot, const char *euc) 
     CALL(FN_DRAW_TEXT_COLOR, g, right - w, y, s, TEXT_MAX, TEXT_WHITE, 0, OUTLINE);
 }
 
+void turn_loot_draw(void);
+static void hud_keys(cpu_t *c);
+
 void f_444cc(cpu_t *c) {
+    hud_keys(c);
+    turn_loot_draw();
+}
+
+static void hud_keys(cpu_t *c) {
     uint32_t hud = got(GOT_HUD);
     int frame = (int8_t)R8(hud + HUD_SOFT_KEY_FRAME);
     char item[HINT_CAP], map[HINT_CAP];

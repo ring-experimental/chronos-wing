@@ -112,11 +112,11 @@ bool turn_test_ctrl(const char *cmd) {
         fprintf(stderr, "[turn] 가방 %d/%d = %d\n", k, id, (int)CALL(0x12b4d0, 0, k, id));
         return true;
     }
-    if (!strcmp(cmd, "ents")) { // 엔티티 목록(*(GOT 0x14)): 종류, 위치. 바닥 드랍 확인용
-        uint32_t l = got(0x14), n = R32(l);
+    if (!strncmp(cmd, "ents", 4)) { // turn ents [GOT 오프셋 16진]: 엔티티 목록(기본 GOT 0x14, 드랍은 0x15c). 종류, 위치
+        uint32_t l = got(cmd[4] ? (uint32_t)strtoul(cmd + 5, NULL, 16) : 0x14), n = R32(l);
         for (int i = 0; n && i < 200; i++, n = R32(n + 4)) {
             uint32_t e = R32(n + 0x10);
-            if (e) fprintf(stderr, "[ent] 종류 %d %08x 위치 %d,%d\n", (int8_t)R8(n + 0x14), e, (int)R32(e + 8), (int)R32(e + 0xc));
+            if (e) fprintf(stderr, "[ent] 종류 %d %08x 위치 %d,%d +20 %d +22 %d +24 %d\n", (int8_t)R8(n + 0x14), e, (int)R32(e + 8), (int)R32(e + 0xc), (int16_t)R16(e + 0x20), (int16_t)R16(e + 0x22), R8(e + 0x24));
         }
         return true;
     }
@@ -184,7 +184,7 @@ bool turn_test_ctrl(const char *cmd) {
         for (uint32_t i = 0; i < n && i < 50; i++) {
             uint32_t m = R32(list + 4 * i);
             if (!m) continue;
-            fprintf(stderr, "[turn] 몬스터 %u: %s EMD %d 등급 %d 맵 %d 위치 %d,%d HP %d 상태 %d\n", i, gstr(m + 0xd0), (int16_t)R16(m + 0xa8), R8(m + 0xb1), (int16_t)R16(m + 0x194), (int)R32(m + 8), (int)R32(m + 0xc), (int)R32(m + 0xec), R8(m + 0xac));
+            fprintf(stderr, "[turn] 몬스터 %u @%08x: %s EMD %d 등급 %d 맵 %d 위치 %d,%d HP %d 상태 %d\n", i, m, gstr(m + 0xd0), (int16_t)R16(m + 0xa8), R8(m + 0xb1), (int16_t)R16(m + 0x194), (int)R32(m + 8), (int)R32(m + 0xc), (int)R32(m + 0xec), R8(m + 0xac));
         }
         fprintf(stderr, "[turn] 보스 슬롯 %08x, 지역 보스 %d\n", R32(got(0x13c)), (int16_t)R16(got(0x194)));
         return true;

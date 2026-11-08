@@ -32,6 +32,8 @@ uint32_t gfx_screen_handle(void);
 #define T_GLOW "\xb8\xf6\xc0\xcc\x20\xba\xfb\xb3\xaa\xb1\xe2\x20\xbd\xc3\xc0\xdb\xc7\xdf\xb4\xd9\x21" // 몸이 빛나기 시작했다!
 #define T_EXPLODE "\xc6\xf8\xb9\xdf\xc7\xdf\xb4\xd9\x21" // 폭발했다!
 #define T_STUN_TAG "\xb1\xe2\xc0\xfd" // 기절
+#define T_LOOT "\xc8\xb9\xb5\xe6" // 획득
+#define T_LOOT_FULL "\xb0\xa1\xb9\xe6\xc0\xcc\x20\xb0\xa1\xb5\xe6\x20\xc2\xf7\xbc\xad\x20\xc1\xdd\xc1\xf6\x20\xb8\xf8\xc7\xd1\x20\xb0\xcd\xc0\xcc\x20\xc0\xd6\xb4\xd9" // 가방이 가득 차서 줍지 못한 것이 있다
 #define T_ENCOUNTER "\xb8\xf3\xbd\xba\xc5\xcd\xbf\xcd\x20\xb8\xb6\xc1\xd6\xc3\xc6\xb4\xd9\x21" // 몬스터와 마주쳤다!
 
 enum {
@@ -257,7 +259,7 @@ static void add_enemy(uint32_t m) {
     a->race = R8(m + E_RACE);
     a->boss = R8(m + E_GRADE) == 0;
     a->kamikaze = R8(m + E_GRADE) == GRADE_KAMIKAZE;
-    a->stun_pct = S8(m + E_STUN_PCT);
+    a->stun_pct = a->boss ? 0 : S8(m + E_STUN_PCT); // 보스는 기절하지 않는다(사용자 결정)
     a->dealt = 0;
     fprintf(stderr, "[turn] 적 %s 등급 %d HP %d 경직 %d%%\n", a->name, R8(m + E_GRADE), a->hp, a->stun_pct);
     a->speed = 8 + a->level / 2; // 정한 값
@@ -336,6 +338,99 @@ static void set_message(const char *s, int ticks) {
     B.msg_ticks = ticks;
 }
 
+static void draw_text(int x, int y, int width, const char *text, uint32_t color, int center);
+static void fill(int x, int y, int w, int h, int r, int g, int b);
+
+// 전투 뒤 자동 줍기. 드랍은 *(GOT 0x15c) 목록의 개체(+0x24 종류, +0x22 id, +0x25 이름)로 생긴다(0x117d7c).
+// 원본 줍기 0x143f1c(사각형)를 드랍마다 불러 가방 넣기, 원본 획득 표시, 수집 퀘스트 집계를 원본 그대로 탄다.
+enum {
+    GOT_DROPS = 0x15c, DROP_ID = 0x22, DROP_KIND = 0x24, DROP_NAME = 0x25,
+    FN_PICKUP = 0x143f1c,
+    LOOT_WINDOW_MS = 4000,  // 처치 동작이 끝나야 드랍이 생기므로 전투 뒤 이 시간 동안 줍는다
+    LOOT_SHOW_MS = 3500,
+    LOOT_LINES = 4, DROP_TRACK = 64,
+};
+static uint32_t loot_old[DROP_TRACK], loot_tried[DROP_TRACK];
+static int loot_old_n, loot_tried_n;
+static uint64_t loot_until, loot_show_until;
+static struct { char name[32]; int n; } loot[LOOT_LINES];
+static int loot_n;
+static bool loot_full;
+
+static int drops_list(uint32_t *out, int max) {
+    cpu_t *c = &cpu;
+    int k = 0;
+    uint32_t n = R32(got(GOT_DROPS));
+    for (int i = 0; n && i < 200 && k < max; i++, n = R32(n + 4)) {
+        uint32_t e = R32(n + 0x10);
+        if (e) out[k++] = e;
+    }
+    return k;
+}
+
+static bool in_set(const uint32_t *set, int n, uint32_t e) {
+    for (int i = 0; i < n; i++) if (set[i] == e) return true;
+    return false;
+}
+
+static void loot_add(const char *name) {
+    fprintf(stderr, "[turn] 자동 줍기: %s\n", name);
+    for (int i = 0; i < loot_n; i++) if (!strcmp(loot[i].name, name)) { loot[i].n++; return; }
+    if (loot_n < LOOT_LINES) { snprintf(loot[loot_n].name, sizeof loot[0].name, "%s", name); loot[loot_n++].n = 1; }
+    else loot[LOOT_LINES - 1].n++;
+}
+
+static void loot_tick(void) {
+    if (!loot_until) return;
+    uint64_t now = now_ms();
+    if (now >= loot_until) { loot_until = 0; return; }
+    cpu_t *c = &cpu;
+    static uint32_t rect;
+    if (!rect) rect = heap_alloc(16);
+    uint32_t before[DROP_TRACK], after[DROP_TRACK];
+    int nb = drops_list(before, DROP_TRACK);
+    for (int i = 0; i < nb; i++) {
+        uint32_t e = before[i];
+        if (in_set(loot_old, loot_old_n, e) || in_set(loot_tried, loot_tried_n, e)) continue;
+        char names[DROP_TRACK][32];
+        for (int k = 0; k < nb; k++) snprintf(names[k], sizeof names[0], "%s", gstr(before[k] + DROP_NAME));
+        W32s(rect, S32(e + 8) - 4);
+        W32s(rect + 4, S32(e + 0xc) - 4);
+        W32s(rect + 8, 8);
+        W32s(rect + 12, 8);
+        CALL(FN_PICKUP, rect);
+        int na = drops_list(after, DROP_TRACK);
+        bool got_e = false;
+        for (int k = 0; k < nb; k++)
+            if (!in_set(after, na, before[k])) { loot_add(names[k]); got_e |= before[k] == e; loot_show_until = now + LOOT_SHOW_MS; }
+        if (!got_e) { // 가방이 차면 남는다. 같은 드랍을 다시 시도하지 않는다
+            if (loot_tried_n < DROP_TRACK) loot_tried[loot_tried_n++] = e;
+            loot_full = true;
+            fprintf(stderr, "[turn] 자동 줍기 실패(가방): %s\n", gstr(e + DROP_NAME));
+            loot_show_until = now + LOOT_SHOW_MS;
+        }
+        return; // 한 틱에 하나씩(원본 획득 표시가 겹치지 않게)
+    }
+}
+
+// 필드 HUD 위에 자동 줍기 결과를 띄운다(padhint.c의 0x1444cc 감싸기에서 부른다).
+void turn_loot_draw(void) {
+    if (!loot_show_until || now_ms() >= loot_show_until || B.phase != S_CLOSED) return;
+    cpu_t *c = &cpu;
+    uint32_t sh = gfx_screen_handle();
+    if (!sh) return;
+    int w = (int)R32(handle_data(sh));
+    int lines = loot_n + (loot_full ? 1 : 0), y = 34;
+    if (!lines) return;
+    fill(w / 2 - 110, y - 3, 220, lines * 14 + 6, 0x10, 0x18, 0x30);
+    for (int i = 0; i < loot_n; i++, y += 14) {
+        char s[64];
+        snprintf(s, sizeof s, T_LOOT " %s x%d", loot[i].name, loot[i].n);
+        draw_text(w / 2, y, 216, s, 0xffe060, 1);
+    }
+    if (loot_full) draw_text(w / 2, y, 216, T_LOOT_FULL, 0xff8080, 1);
+}
+
 static void open_battle(uint32_t first, int kind) {
     cpu_t *c = &cpu;
     uint32_t sh = gfx_screen_handle();
@@ -372,6 +467,8 @@ static void open_battle(uint32_t first, int kind) {
     }
     B.n = 0;
     B.boss_fled = 0;
+    loot_old_n = drops_list(loot_old, DROP_TRACK); // 전투 전부터 바닥에 있던 드랍은 줍지 않는다
+    loot_until = 0;
     add_enemy(first);
     // 소환수를 부른 몬스터는 소환수가 다 죽을 때까지 무적이다(+0x295). 소환수를 먼저 모두 넣는다.
     for (int i = 0; i < list_count(GOT_SUMMONS) && B.n < MAX_ENEMIES; i++) {
@@ -854,10 +951,13 @@ static void finish(void) {
         }
         ts_sprite_free(&a->spr);
     }
+    bool killed = false;
+    for (int i = 0; i < B.n; i++) killed |= !B.a[i].party && !B.a[i].alive;
     fprintf(stderr, "[turn] 전투 끝: %s\n", B.won ? "승리" : B.boss_fled ? "보스 도주" : B.fled ? "도망" : "전멸");
     B.phase = S_CLOSED;
     B.n = 0;
     cooldown_until = now_ms() + COOLDOWN_MS;
+    if (killed) { loot_until = now_ms() + LOOT_WINDOW_MS; loot_tried_n = 0; loot_n = 0; loot_full = false; }
     check_at = now_ms() + 2000;
     check_mon = B.won ? B.a[0].mon : 0;
     check_exp = S32(hero + 0xf4);
@@ -889,6 +989,7 @@ static void step(void) {
 
 void turn_battle_tick(void) {
     turn_test_tick();
+    if (B.phase == S_CLOSED) loot_tick();
     if (pending_monster && B.phase == S_CLOSED) {
         uint32_t m = pending_monster;
         pending_monster = 0;
