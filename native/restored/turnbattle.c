@@ -27,6 +27,11 @@ uint32_t gfx_screen_handle(void);
 #define T_TARGET "\xb4\xeb\xbb\xf3\xc0\xbb\x20\xb0\xed\xb8\xa3\xbc\xbc\xbf\xe4"             // 대상을 고르세요
 #define T_GUARDING "\xb9\xe6\xbe\xee\x20\xc0\xda\xbc\xbc\xb8\xa6\x20\xc3\xeb\xc7\xdf\xb4\xd9" // 방어 자세를 취했다
 #define T_BOSS_FLED "\xb4\xde\xbe\xc6\xb3\xb5\xb4\xd9\x21"                                      // 달아났다!
+#define T_STUNNED "\xb1\xe2\xc0\xfd\xc7\xdf\xb4\xd9\x21" // 기절했다!
+#define T_STUN_SKIP "\xb1\xe2\xc0\xfd\xc7\xd8\xbc\xad\x20\xbf\xf2\xc1\xf7\xc0\xcc\xc1\xf6\x20\xb8\xf8\xc7\xd1\xb4\xd9" // 기절해서 움직이지 못한다
+#define T_GLOW "\xb8\xf6\xc0\xcc\x20\xba\xfb\xb3\xaa\xb1\xe2\x20\xbd\xc3\xc0\xdb\xc7\xdf\xb4\xd9\x21" // 몸이 빛나기 시작했다!
+#define T_EXPLODE "\xc6\xf8\xb9\xdf\xc7\xdf\xb4\xd9\x21" // 폭발했다!
+#define T_STUN_TAG "\xb1\xe2\xc0\xfd" // 기절
 #define T_ENCOUNTER "\xb8\xf3\xbd\xba\xc5\xcd\xbf\xcd\x20\xb8\xb6\xc1\xd6\xc3\xc6\xb4\xd9\x21" // 몬스터와 마주쳤다!
 
 enum {
@@ -68,6 +73,8 @@ enum {
     E_INVULN = 0x295, E_INVULN2 = 0x297, E_SUMMONED = 0x296, E_RUN_TICKS = 0x2b3,
     GOT_SUMMONS = 0xbfc, GOT_STAGE = 0x13c, STAGE_MAP = 0x2d4,
     MAP_PRACTICE_A = 0xb2, MAP_PRACTICE_B = 0xb3, // 0x1750f0: 몬스터가 죽지 않고 주인공도 피해를 받지 않는 맵
+    GRADE_KAMIKAZE = 5, // 에너지·자폭병: 원본은 닿으면 터진다(0x148e44). 턴제에서는 1턴 지난 다음 차례에 터진다
+    E_STUN_PCT = 0x124, // 원본 경직 문턱(0x14b0e0): 누적 피해 ≥ 최대 HP × 이 값%
     GRADE_OBJECT = 4, // 결계석, 광석·약초 덩이, 책장, 상자: 칠 때마다 떨구는 채집 대상. 전투가 아니라 원본 그대로 친다
     MON_DYING = 5, MON_DEAD = 7, CMD_DEAD = 100,
     H_CLASS = 0xb1, H_MP = 0x114, H_MPMAX = 0x118, H_LINK = 0x11c,
@@ -97,6 +104,12 @@ typedef struct {
     uint32_t mon;          // 적이면 게임 몬스터 개체
     bool boss;
     int dealt;             // 적이 이번 전투에서 받은 피해 합(끝날 때 원본 피해 함수로 넘긴다)
+    bool kamikaze;         // 등급 5. 자기 차례를 한 번 보낸 뒤 다음 차례에 터진다
+    bool exploded;         // 스스로 터져 죽었다(정산은 원본 자폭과 같이 HP 전부를 피해로 넘긴다)
+    int turns;             // 이번 전투에서 보낸 자기 차례 수
+    int stun_pct, stun_acc; // 원본 경직 문턱과 이번 전투 누적 피해
+    bool stunned;          // 다음 자기 차례를 쉰다
+    bool stun_guard;       // 기절에서 풀린 뒤 한 번 행동할 때까지 다시 기절하지 않는다(원본 경직 사이 대기 +0x1d4 대신)
     ts_sprite spr;
     ts_c0 c0;
     bool has_c0;
@@ -243,7 +256,10 @@ static void add_enemy(uint32_t m) {
     a->level = S8(m + E_LEVEL);
     a->race = R8(m + E_RACE);
     a->boss = R8(m + E_GRADE) == 0;
+    a->kamikaze = R8(m + E_GRADE) == GRADE_KAMIKAZE;
+    a->stun_pct = S8(m + E_STUN_PCT);
     a->dealt = 0;
+    fprintf(stderr, "[turn] 적 %s 등급 %d HP %d 경직 %d%%\n", a->name, R8(m + E_GRADE), a->hp, a->stun_pct);
     a->speed = 8 + a->level / 2; // 정한 값
     a->alpha = 255;
     load_em_sprite(a, S16(m + E_EMD));
@@ -559,6 +575,7 @@ static void draw_scene(void) {
         actor *a = &B.a[i];
         if (a->party || !a->alive) continue;
         bar(a->home_x - 20, a->home_y + 6, 40, a->hp, a->hpmax, 0xe0, 0x40, 0x40);
+        if (a->stunned) draw_text(a->home_x, a->home_y + 10, 60, T_STUN_TAG, 0xffe060, 1);
     }
     video_present(sh);
 }
@@ -647,6 +664,18 @@ static void hit(actor *to, int dmg) {
     set_pose(to, to->hp > 0 ? P_HIT : P_DEAD);
     if (to->hp <= 0) to->alive = false;
     if (!B.boss_fled && boss_escapes(to)) B.boss_fled = (int)(to - B.a) + 1;
+    // 원본 0x14b0e0과 같은 문턱의 경직. 턴제에서는 다음 자기 차례를 쉬는 기절로 옮긴다.
+    if (!to->party && to->alive && to->stun_pct > 0 && !to->stunned && !to->stun_guard) {
+        to->stun_acc += dmg;
+        if (to->stun_acc >= to->hpmax * to->stun_pct / 100) {
+            char msg[64];
+            to->stun_acc = 0;
+            to->stunned = true;
+            snprintf(msg, sizeof msg, "%s " T_STUNNED, to->name);
+            fprintf(stderr, "[turn] 기절: %s\n", to->name);
+            set_message(msg, 25);
+        }
+    }
 }
 
 static void begin_action(int actor_i, action act, int target) {
@@ -661,6 +690,38 @@ static void begin_action(int actor_i, action act, int target) {
 static void next_turn(void);
 
 static void enemy_turn(int i) {
+    actor *a = &B.a[i];
+    char msg[64];
+    a->turns++;
+    if (a->stunned) { // 기절: 이번 차례를 쉰다. 자폭 에너지도 터지지 않는다
+        a->stunned = false;
+        a->stun_guard = true;
+        snprintf(msg, sizeof msg, "%s " T_STUN_SKIP, a->name);
+        set_message(msg, 25);
+        B.phase = S_MESSAGE;
+        B.step_tick = 0;
+        return;
+    }
+    a->stun_guard = false;
+    if (a->kamikaze) {
+        if (a->turns < 2) { // 첫 차례는 예고만 한다
+            snprintf(msg, sizeof msg, "%s " T_GLOW, a->name);
+            set_message(msg, 25);
+        } else { // 아군 모두에게 피해를 주고 스스로 죽는다(원본 0x148e44가 HP 전부를 피해로 넘기는 것과 같게 정산)
+            for (int k = 0; k < B.n; k++)
+                if (B.a[k].party && B.a[k].alive) hit(&B.a[k], damage_to_party(a, &B.a[k]));
+            a->exploded = true;
+            a->alive = false;
+            a->hp = 0;
+            set_pose(a, P_DEAD);
+            snprintf(msg, sizeof msg, "%s " T_EXPLODE, a->name);
+            set_message(msg, 30);
+            fprintf(stderr, "[turn] 자폭: %s\n", a->name);
+        }
+        B.phase = S_MESSAGE;
+        B.step_tick = 0;
+        return;
+    }
     int targets[MAX_PARTY], n = 0;
     for (int k = 0; k < B.n; k++)
         if (B.a[k].party && B.a[k].alive) targets[n++] = k;
@@ -760,7 +821,7 @@ static void act_tick(void) {
 static void settle_enemy(actor *a) {
     cpu_t *c = &cpu;
     uint32_t m = a->mon;
-    if (!m || !a->dealt) return;
+    if (!m || (!a->dealt && !a->exploded)) return;
     if (!a->alive) {
         // 소환수 보호(+0x295)와 도주 동작은 원본에서 피해를 막는다. 전투 안에서 이미 이겼으므로 푼다.
         W8(m + E_INVULN, 0);
