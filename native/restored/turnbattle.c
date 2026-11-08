@@ -60,6 +60,14 @@ enum {
     FN_ESCAPING3 = 0x14ed34, FN_ESCAPING4 = 0x14ed6c, // (보스) 도주 중
     FN_END_ESCAPE = 0x14a2d8, // (보스, 1) 도주 동작을 끝낸다
     FN_PANEL = 0x172aa8,
+    FN_SPR_DRAW = 0x17ead0,   // (화면, 그림, 동작, 방향, &프레임, x, y, 반전, 시트(-1 전부), 0)
+    FN_SPR_ALPHA = 0x17f438,
+    FN_SHADOW = 0x1046f0, FN_MON_KIND = 0x14eb8c, FN_MON_BIG = 0x14ec44, FN_MON_NO_SHADOW_A = 0x14ec14, FN_MON_NO_SHADOW_B = 0x14b3b8,  // (그림, 켜기, 투명도) 필드 사라지기(0x149064)
+    FN_SPR_INIT = 0x17df3c, FN_SPR_FREE = 0x17dfc4, // 그림 객체 비우기, 풀기
+    FN_LOAD_EMS = 0x14efb8,   // (몬스터) +0xaa 묶음과 효과 표를 +0x38 그림에 싣는다
+    FN_LOAD_SHEETS = 0x14f040, // (몬스터) +0x10c 그림 3장, +0x112 팔레트 3개
+    FN_NUM_INIT = 0x118420, FN_NUM_DRAW = 0x118528, FN_NUM_STEP = 0x1184bc,
+    SPR_HIT_X = 0, SPR_HIT_Y = 4, SPR_TINT = 0x60, SPR_ANIMS = 0x3c, SPR_ANIM_TABLE = 0x44,
     FN_DRAW_LINE = 0x12c50c,
     FN_SET_COLOR = 0x12d734,
 
@@ -69,7 +77,7 @@ enum {
     // 몬스터(0x2bc)와 주인공은 같은 구조다
     E_X = 0x8, E_Y = 0xc, E_ACTIVE = 0x18, E_MAP = 0x1c, E_EMD = 0xa8, E_STATE = 0xac, E_DIR = 0xae,
     E_GRADE = 0xb1, E_RACE = 0xb3, E_NAME = 0xd0, E_HP = 0xec, E_HPMAX = 0xf0, E_LEVEL = 0x101,
-    E_RESPAWNS = 0x138,
+    E_RESPAWNS = 0x138, E_SIZE = 0x2bc, E_SPRITE = 0x38, E_EMS = 0xaa, E_IMG = 0x10c, E_PAL = 0x112, E_LIFT = 0x29c, E_SHADOW_W = 0xc4, E_SHADOW_H = 200,
     // 보스(0x14ad54 안의 0x14b1a8, 0x14b208): 누적 피해 +0x1d0이 최대 HP × +0x17e%에 닿으면 도주 3, HP가 최대 × +0x17f% 이하로 처음 내려가면(+0x19a) 도주 4
     E_ESC_CUM_PCT = 0x17e, E_ESC_HP_PCT = 0x17f, E_ESC_HP_DONE = 0x19a, E_ESC_CUM = 0x1d0,
     E_INVULN = 0x295, E_INVULN2 = 0x297, E_SUMMONED = 0x296, E_RUN_TICKS = 0x2b3,
@@ -88,6 +96,7 @@ enum {
     EM_RECORD_TAIL = 0x30 + 5 * 10,
 
     TICK_MS = 40,               // 원본 기본 25fps(0x1592a4)
+    MAX_POPUPS = 8, NUM_SIZE = 0xa4,
     MAX_ENEMIES = 5, MAX_PARTY = 4, MAX_ACTORS = MAX_ENEMIES + MAX_PARTY,
     GROUP_RANGE = 72,           // 정한 값: 닿은 몬스터에서 이 거리 안의 몬스터가 같이 싸운다
     COOLDOWN_MS = 2500,         // 정한 값: 전투가 끝난 뒤 다시 마주치지 않는 시간
@@ -112,7 +121,9 @@ typedef struct {
     int stun_pct, stun_acc; // 원본 경직 문턱과 이번 전투 누적 피해
     bool stunned;          // 다음 자기 차례를 쉰다
     bool stun_guard;       // 기절에서 풀린 뒤 한 번 행동할 때까지 다시 기절하지 않는다(원본 경직 사이 대기 +0x1d4 대신)
-    ts_sprite spr;
+    uint32_t obj;          // 게임 그림 객체(0x70바이트). 적과 주인공은 필드 개체의 것(+0x38)을 그대로 쓴다
+    uint32_t own;          // 동료: 그림을 싣으려고 만든 몬스터 모양 개체(끝날 때 푼다)
+    int lift;              // 몬스터 공중 높이(+0x29c, 필드 그리기 0x149064와 같이 뺀다)
     ts_c0 c0;
     bool has_c0;
     int home_x, home_y, x, y;
@@ -120,6 +131,8 @@ typedef struct {
     int tick;              // 지금 동작의 경과 틱
     int alpha;
 } actor;
+
+static void pop_clear(void);
 
 typedef enum { S_CLOSED, S_INTRO, S_NEXT, S_COMMAND, S_TARGET, S_ACT, S_MESSAGE, S_END } phase;
 typedef enum { A_ATTACK, A_SKILL, A_GUARD, A_ESCAPE } action;
@@ -139,7 +152,7 @@ static struct {
     bool won, lost, fled, first_strike, ambushed;
     int boss_fled;         // 도주 문턱을 넘은 보스 번호 + 1
     uint64_t last_tick;
-    int popup_actor, popup_value, popup_ticks;
+    struct { uint32_t num; int actor; } pop[MAX_POPUPS]; // 피해 숫자(원본 숫자 개체)
 } B;
 
 static uint32_t pending_monster;
@@ -223,23 +236,36 @@ static em_look em_load(int id) {
     return r;
 }
 
-static void load_em_sprite(actor *a, int id) {
+static void load_c0(actor *a, int id) {
     em_look l = em_load(id);
     if (!l.ok) { fprintf(stderr, "[turn] EMD/M %d 읽기 실패\n", id); return; }
-    ts_monster_sprite(&a->spr, game_dir, l.ems, l.img, l.pal);
     a->has_c0 = ts_c0_load(&a->c0, game_dir, l.c0);
 }
 
-// 주인공 그림: 동작 묶음 H/S<클래스>(0x12ee2c), 시트 4장(0x1738fc): 0 HIMG/000/<칸1>, 1 HIMG/001/<칸2>, 2 무기 HIMG/002/<클래스>/<칸0>, 3 몸 HIMG/003/<클래스>
-static void load_hero_sprite(actor *a, int cls) {
-    char p[4][1100], ems[1100];
-    snprintf(p[0], sizeof p[0], "%s/HIMG/000/%03d", game_dir, (int)CALL(FN_EQUIP, 1));
-    snprintf(p[1], sizeof p[1], "%s/HIMG/001/%03d", game_dir, (int)CALL(FN_EQUIP, 2));
-    snprintf(p[2], sizeof p[2], "%s/HIMG/002/%03d/%03d", game_dir, cls, (int)CALL(FN_EQUIP, 0));
-    snprintf(p[3], sizeof p[3], "%s/HIMG/003/%03d", game_dir, cls);
-    const char *paths[4] = {p[0], p[1], p[2], p[3]};
-    snprintf(ems, sizeof ems, "%s/H/S%03d", game_dir, cls); // EMS와 같은 형식
-    ts_sprite_load_path(&a->spr, ems, paths, NULL, game_dir);
+// 동료 그림: 필드 몬스터와 같은 원본 경로로 싣는다. 빈 개체에 묶음(+0xaa), 그림(+0x10c), 팔레트(+0x112)를 넣고
+// 0x14efb8(묶음, 효과 표), 0x14f040(시트 3장 + 팔레트, 0x17385c)을 부른다. 그리기는 원본 0x17ead0이 한다.
+static void load_member_sprite(actor *a, int id) {
+    cpu_t *c = &cpu;
+    em_look l = em_load(id);
+    if (!l.ok) { fprintf(stderr, "[turn] EMD/M %d 읽기 실패\n", id); return; }
+    a->has_c0 = ts_c0_load(&a->c0, game_dir, l.c0);
+    uint32_t e = heap_alloc(E_SIZE);
+    memset(c->m + e, 0, E_SIZE);
+    CALL(FN_SPR_INIT, e + E_SPRITE);
+    W16(e + E_EMS, (uint16_t)l.ems);
+    for (int i = 0; i < 3; i++) { W16(e + E_IMG + 2 * i, (uint16_t)l.img[i]); W16(e + E_PAL + 2 * i, (uint16_t)l.pal[i]); }
+    CALL(FN_LOAD_EMS, e);
+    CALL(FN_LOAD_SHEETS, e);
+    a->own = e;
+    a->obj = e + E_SPRITE;
+}
+
+static void free_sprite(actor *a) {
+    if (a->own) {
+        CALL(FN_SPR_FREE, a->obj);
+        heap_free(a->own);
+    }
+    a->own = a->obj = 0;
 }
 
 // ---- 전투 준비 ----
@@ -264,7 +290,9 @@ static void add_enemy(uint32_t m) {
     fprintf(stderr, "[turn] 적 %s 등급 %d HP %d 경직 %d%%\n", a->name, R8(m + E_GRADE), a->hp, a->stun_pct);
     a->speed = 8 + a->level / 2; // 정한 값
     a->alpha = 255;
-    load_em_sprite(a, S16(m + E_EMD));
+    a->obj = m + E_SPRITE;
+    a->lift = S32(m + E_LIFT);
+    load_c0(a, S16(m + E_EMD));
 }
 
 static void add_hero(void) {
@@ -286,7 +314,7 @@ static void add_hero(void) {
     a->alpha = 255;
     fprintf(stderr, "[turn] 주인공 Lv%d HP %d/%d MP %d/%d 공격 %d(무기 %d × %d%%) 방어 %d/%d\n", a->level, a->hp, a->hpmax, a->mp, a->mpmax,
             a->atk, weapon, pct, (int)CALL(FN_HERO_DEF, 0), (int)CALL(FN_HERO_DEF, 1));
-    load_hero_sprite(a, R8(h + H_CLASS));
+    a->obj = h + E_SPRITE; // 주인공 그림은 필드 개체의 것(H/S<클래스>, 장비 시트 4장)
 }
 
 // 동료 수치는 클라이언트에 없다. 네트워크 방어진(member_stats)과 같은 정한 값: HP 100+40L, 공격 10+4L, 방어 5+2L
@@ -304,7 +332,7 @@ static void add_member(int i) {
     a->pdef = a->mdef = 5 + 2 * a->level;
     a->speed = 10 + a->level / 2;
     a->alpha = 255;
-    load_em_sprite(a, S16(e + MEMBER_EMD));
+    load_member_sprite(a, S16(e + MEMBER_EMD));
 }
 
 static bool member_joined(int i) {
@@ -500,7 +528,7 @@ static void open_battle(uint32_t first, int kind) {
     B.ambushed = kind == 1;
     B.won = B.lost = B.fled = false;
     B.order_n = B.order_at = 0;
-    B.popup_ticks = 0;
+    pop_clear();
     B.phase = S_INTRO;
     B.step_tick = 0;
     set_message(B.first_strike ? T_FIRST : B.ambushed ? T_AMBUSH : T_ENCOUNTER, 30);
@@ -534,16 +562,31 @@ static int hero_anim(pose p) {
     }
 }
 
-static void pose_anim(const actor *a, int *anim, int *dir, bool *mirror) {
-    *mirror = false;
+// 그림 객체(0x17e078이 채운다): +0x3c 동작 수, +0x44 핸들 → 동작마다 0x48바이트, 앞 4바이트가 방향별 프레임 수(0x17f44c)
+static int obj_anims(const actor *a) {
+    cpu_t *c = &cpu;
+    return a->obj ? R8(a->obj + SPR_ANIMS) : 0;
+}
+
+// 프레임 수. 그 방향이 비어 있으면 방향 0(정면)으로 바꾼다. 방향 3은 2를 좌우로 뒤집어 쓴다(0x17f44c).
+static int obj_frames(const actor *a, int anim, int *dir) {
+    cpu_t *c = &cpu;
+    if (anim < 0 || anim >= obj_anims(a)) return 0;
+    uint32_t t = R32(R32(a->obj + SPR_ANIM_TABLE)) + 8 + (uint32_t)anim * 0x48;
+    int n = R8(t + (*dir == 3 ? 2 : *dir));
+    if (!n && *dir) { *dir = 0; n = R8(t); }
+    return n;
+}
+
+// 방향 0~3: 2가 오른쪽, 3은 2의 좌우 반전(왼쪽). 적은 오른쪽, 아군은 왼쪽을 본다.
+static void pose_anim(const actor *a, int *anim, int *dir) {
+    int face = a->party ? 3 : 2;
     if (a->hero) {
         *anim = hero_anim(a->pose);
-        if (*anim >= a->spr.nanims) *anim = 9;
-        *dir = 2;
-        *mirror = a->party; // 방향 2는 오른쪽을 본다. 아군은 왼쪽을 봐야 하므로 반전
+        if (*anim >= obj_anims(a)) *anim = 9;
+        *dir = face;
         return;
     }
-    int face = a->party ? 3 : 2; // 바라보는 방향 0~3, 2 오른쪽, 3은 2의 좌우 반전(왼쪽, 0x17ead0)
     int st = pose_state(a, a->pose);
     if (a->has_c0 && st < a->c0.count && a->c0.anim[st][face] >= 0) {
         *anim = a->c0.anim[st][face];
@@ -555,14 +598,45 @@ static void pose_anim(const actor *a, int *anim, int *dir, bool *mirror) {
         *anim = st;
         *dir = face;
     }
-    if (*dir == 3) { *dir = 2; *mirror = true; }
+}
+
+// 발밑 그림자 0x1046f0(개체, x, y, 폭, 높이). 필드와 같은 조건과 크기: 몬스터는 0x149064(공중·특수 종류는 없음, 폭 0x16, 큰 몬스터 0x32,
+// 높이 +200), 주인공은 0x13549c(폭 +0xc4, 높이 +200, y - 2). 동료는 필드 개체가 없어 주인공 크기를 쓴다(정한 값).
+static void draw_shadow(const actor *a) {
+    cpu_t *c = &cpu;
+    if (a->alpha < 255) return;
+    if (a->party) {
+        uint32_t h = CALL(FN_HERO);
+        CALL(FN_SHADOW, h, a->x, a->y - 2, R32(h + E_SHADOW_W), R32(h + E_SHADOW_H));
+        return;
+    }
+    uint32_t m = a->mon;
+    if (CALL(FN_MON_NO_SHADOW_A, m) & 0xff || CALL(FN_MON_NO_SHADOW_B, m) & 0xff) return;
+    int kind = (int16_t)CALL(FN_MON_KIND, m);
+    if (kind == 2 || kind == 3 || kind == 4 || kind == 5 || kind == 13 || kind == 14) return;
+    CALL(FN_SHADOW, m, a->x, a->y - a->lift, CALL(FN_MON_BIG, m) & 0xff ? 0x32 : 0x16, R32(m + E_SHADOW_H));
+}
+
+// 원본 그리기 0x17ead0(화면, 그림, 동작, 방향, &프레임, x, y, 0, -1, 0)를 그대로 부른다. 필드 그리기(0x149064, 0x13549c)와 같다.
+// 필드에서 걸어 둔 색 효과(+0x60~+0x65)는 끄고 그린 뒤 되돌린다. 투명도는 원본 사라지기와 같은 0x17f438(그림, 1, 값).
+static void draw_actor(const actor *a, int anim, int dir, int frame) {
+    cpu_t *c = &cpu;
+    static uint32_t fbyte;
+    if (!fbyte) fbyte = heap_alloc(4);
+    uint8_t tint[6];
+    memcpy(tint, c->m + a->obj + SPR_TINT, 6);
+    W8(a->obj + SPR_TINT + 5, 0);
+    W8(fbyte, (uint8_t)frame);
+    if (a->alpha < 255) CALL(FN_SPR_ALPHA, a->obj, 1, a->alpha);
+    CALL(FN_SPR_DRAW, R32(got(GOT_SCREEN)), a->obj, anim, dir, fbyte, a->x, a->y - a->lift, 0, 0xffffffffu, 0);
+    if (a->alpha < 255) CALL(FN_SPR_ALPHA, a->obj, 0, 0xff);
+    memcpy(c->m + a->obj + SPR_TINT, tint, 6);
 }
 
 static int pose_frames(const actor *a) {
     int anim, dir;
-    bool mirror;
-    pose_anim(a, &anim, &dir, &mirror);
-    return ts_frames(&a->spr, anim, dir);
+    pose_anim(a, &anim, &dir);
+    return obj_frames(a, anim, &dir);
 }
 
 static bool pose_loops(pose p) { return p == P_IDLE || p == P_WALK; }
@@ -599,7 +673,6 @@ static void draw_scene(void) {
     uint8_t *px = c->m + handle_data(R32(f + 16));
     memcpy(px, B.snapshot, (size_t)B.h * B.bpl);
     int panel_y = B.h - 96;
-    ts_target t = {px, B.w, B.h, B.bpl, 0, panel_y};
     // 발 y 순서로 그린다
     int idx[MAX_ACTORS];
     for (int i = 0; i < B.n; i++) idx[i] = i;
@@ -608,12 +681,14 @@ static void draw_scene(void) {
     for (int i = 0; i < B.n; i++) {
         actor *a = &B.a[idx[i]];
         if (!a->used || a->alpha <= 0) continue;
+        if (!a->obj) continue;
         int anim, dir;
-        bool mirror;
-        pose_anim(a, &anim, &dir, &mirror);
-        int n = ts_frames(&a->spr, anim, dir);
-        int fr = n ? (pose_loops(a->pose) ? a->tick % n : a->tick < n ? a->tick : n - 1) : 0;
-        ts_draw(&t, &a->spr, anim, dir, fr, a->x, a->y, mirror, a->alpha);
+        pose_anim(a, &anim, &dir);
+        int n = obj_frames(a, anim, &dir);
+        if (!n) continue;
+        int fr = pose_loops(a->pose) ? a->tick % n : a->tick < n ? a->tick : n - 1;
+        draw_shadow(a);
+        draw_actor(a, anim, dir, fr);
     }
     // 고르는 대상 표시
     if (B.phase == S_TARGET) {
@@ -624,11 +699,11 @@ static void draw_scene(void) {
         fill(a->x - 3, a->y + 4, 7, 3, 0x60, 0xd0, 0xff);
     }
     // 피해 숫자
-    if (B.popup_ticks > 0) {
-        actor *a = &B.a[B.popup_actor];
-        char s[16];
-        snprintf(s, sizeof s, "%d", B.popup_value);
-        draw_text(a->x, a->y - 56 - (20 - B.popup_ticks), 60, s, B.popup_value ? 0xffffff : 0xa0a0a0, 1);
+    for (int k = 0; k < MAX_POPUPS; k++) {
+        if (!B.pop[k].num) continue;
+        const actor *a = &B.a[B.pop[k].actor];
+        CALL(FN_NUM_DRAW, B.pop[k].num, a->x + S32(a->obj + SPR_HIT_X), a->y - a->lift + S32(a->obj + SPR_HIT_Y));
+        if (CALL(FN_NUM_STEP, B.pop[k].num) & 0xff) { heap_free(B.pop[k].num); B.pop[k].num = 0; }
     }
     // 위쪽 알림
     if (B.msg_ticks > 0 && B.msg[0]) {
@@ -750,14 +825,34 @@ static bool boss_escapes(const actor *a) {
     return pct > 0 && !R8(m + E_ESC_HP_DONE) && a->hp <= a->hpmax * pct / 100;
 }
 
+// 피해 숫자: 필드의 0x10264c와 같이 숫자 개체를 0x118420(개체, 종류, 0, 값)으로 채운다. 종류 0은 몬스터가 받은 피해(주황 숫자)다.
+// 원작은 주인공이 맞으면 숫자 없이 HUD 막대만 줄이므로(0x103ebc → 0x144100) 아군 피해도 같은 종류 0으로 보인다(정한 값). 필드는 개체 목록(+0x20)에 붙여 0x103ab8이 그리지만 전투는 멈춰 있으므로 직접 그린다:
+// 0x118528(개체, x, y)로 그리고 0x1184bc가 참이면 끝. 위치는 그림의 맞는 점(그림 +0, +4)이다.
+static void pop_clear(void) {
+    for (int k = 0; k < MAX_POPUPS; k++) {
+        if (B.pop[k].num) heap_free(B.pop[k].num);
+        B.pop[k].num = 0;
+    }
+}
+
+static void pop_add(const actor *to, int dmg) {
+    cpu_t *c = &cpu;
+    int k = 0;
+    while (k < MAX_POPUPS && B.pop[k].num) k++;
+    if (k == MAX_POPUPS || !to->obj) return;
+    uint32_t n = heap_alloc(NUM_SIZE);
+    memset(c->m + n, 0, NUM_SIZE);
+    CALL(FN_NUM_INIT, n, 0, 0, (uint32_t)dmg);
+    B.pop[k].num = n;
+    B.pop[k].actor = (int)(to - B.a);
+}
+
 static void hit(actor *to, int dmg) {
     if (dmg > to->hp) dmg = to->hp;
     if (!to->party) to->dealt += dmg;
     to->hp -= dmg;
     if (to->hp < 0) to->hp = 0;
-    B.popup_actor = (int)(to - B.a);
-    B.popup_value = dmg;
-    B.popup_ticks = 20;
+    pop_add(to, dmg);
     set_pose(to, to->hp > 0 ? P_HIT : P_DEAD);
     if (to->hp <= 0) to->alive = false;
     if (!B.boss_fled && boss_escapes(to)) B.boss_fled = (int)(to - B.a) + 1;
@@ -949,11 +1044,12 @@ static void finish(void) {
             W32s(hero + E_HP, a->hp > 0 ? a->hp : 0);
             W32s(hero + H_MP, a->mp);
         }
-        ts_sprite_free(&a->spr);
+        free_sprite(a);
     }
     bool killed = false;
     for (int i = 0; i < B.n; i++) killed |= !B.a[i].party && !B.a[i].alive;
     fprintf(stderr, "[turn] 전투 끝: %s\n", B.won ? "승리" : B.boss_fled ? "보스 도주" : B.fled ? "도망" : "전멸");
+    pop_clear();
     B.phase = S_CLOSED;
     B.n = 0;
     cooldown_until = now_ms() + COOLDOWN_MS;
@@ -970,7 +1066,6 @@ static void step(void) {
         if (a->pose == P_HIT && a->tick >= pose_frames(a) + 3) set_pose(a, P_IDLE);
         if (a->pose == P_DEAD && a->tick > pose_frames(a) + 4 && a->alpha > 0) a->alpha -= 25;
     }
-    if (B.popup_ticks > 0) B.popup_ticks--;
     if (B.msg_ticks > 0) B.msg_ticks--;
     switch (B.phase) {
     case S_INTRO:
