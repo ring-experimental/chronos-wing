@@ -115,7 +115,10 @@ enum {
     GROUP_RANGE = 72,           // 정한 값: 닿은 몬스터에서 이 거리 안의 몬스터가 같이 싸운다
     // 턴제 환산(정한 값): 실시간 전투는 적 한 번 공격하는 동안 주인공이 여러 번 치고 피하므로, 적 HP와 적이 주는 피해를 줄인다.
     // 처치·부분 피해 정산과 보스 도주 문턱은 원본 단위로 되돌려 계산한다.
-    ENEMY_HP_PCT = 20, ENEMY_DMG_PCT = 50,
+    // 적 HP는 전투마다 파티 화력에 맞춘다(사용자 결정 2026-11-09): 파티 한 바퀴 예상 피해로 처음 마주친 적이 일반이면 약 3바퀴, 보스가 있으면 약 8바퀴.
+    // 같은 배율을 모든 적에 써서 원작 HP 비율은 유지한다. 배율은 원작 HP의 3%~500%로 묶는다(초반에는 파티 4인이 원작 한 명보다 세서 원작보다 커질 수 있다).
+    ROUNDS_NORMAL = 3, ROUNDS_BOSS = 8, HP_SCALE_MIN = 3, HP_SCALE_MAX = 500,
+    ENEMY_DMG_PCT = 50,
     COOLDOWN_MS = 2500,         // 정한 값: 전투가 끝난 뒤 다시 마주치지 않는 시간
     KEY_UP = -1, KEY_DOWN = -2, KEY_LEFT = -3, KEY_RIGHT = -4, KEY_OK = -5, KEY_CLEAR = -16,
 };
@@ -129,6 +132,7 @@ typedef struct {
     bool used, party, hero, alive, guarding;
     char name[28];
     int hp, hpmax, mp, mpmax, atk, pdef, mdef, level, speed, race;
+    int ohp, ohpmax;       // 적: 원작 HP(정산은 원본 단위로)
     int member;            // 동료 번호(0 엔지 ~ 7 팡), 아니면 -1
     int cls;               // 주인공 클래스(0 격투, 1 검, 2 정령)
     tskill basic, skills[MAX_SKILLS];
@@ -309,8 +313,7 @@ static void free_sprite(actor *a) {
 
 static int rnd(int n) { return n > 0 ? rand() % n : 0; }
 
-static int scaled_hp(int v) { int r = v * ENEMY_HP_PCT / 100; return v > 0 && r < 1 ? 1 : r; }
-static int orig_dealt(const actor *a) { return a->dealt * 100 / ENEMY_HP_PCT; } // 원본 단위 피해
+static int orig_dealt(const actor *a) { return a->hpmax > 0 ? (int)((int64_t)a->dealt * a->ohpmax / a->hpmax) : a->dealt; } // 원본 단위 피해
 
 static actor *new_actor(void) {
     actor *a = &B.a[B.n++];
@@ -326,8 +329,8 @@ static void add_enemy(uint32_t m) {
     actor *a = new_actor();
     a->mon = m;
     memcpy(a->name, gstr(m + E_NAME), 27);
-    a->hp = scaled_hp(S32(m + E_HP));
-    a->hpmax = scaled_hp(S32(m + E_HPMAX));
+    a->hp = a->ohp = S32(m + E_HP); // 원작 HP. 파티가 정해진 뒤 scale_enemies가 줄인다
+    a->hpmax = a->ohpmax = S32(m + E_HPMAX);
     a->level = S8(m + E_LEVEL);
     a->race = R8(m + E_RACE);
     a->boss = R8(m + E_GRADE) == 0;
@@ -389,6 +392,59 @@ static void add_member(int i) {
 
 
 // 자리: 적은 왼쪽(오른쪽을 봄), 아군은 오른쪽(왼쪽을 봄). 화면 높이 320 기준 위쪽 3/5이 전장이다.
+// 파티 한 바퀴 예상 피해(무작위 없이): 주인공은 기본 콤보 동작마다 원본 식(0x101ff4 × 0x102188 - 방어 + 상성), 동료는 공격력 - 방어.
+static int party_round_damage(const actor *e) {
+    cpu_t *c = &cpu;
+    int total = 0;
+    for (int i = 0; i < B.n; i++) {
+        const actor *a = &B.a[i];
+        if (!a->party) continue;
+        const tskill *k = &a->basic;
+        int def = (int)CALL(FN_MON_DEF, e->mon, (uint32_t)(k->magic != 0));
+        if (a->hero) {
+            int n = k->nmotion ? k->nmotion : 1;
+            for (int h = 0; h < n; h++) {
+                int m = k->nmotion ? k->motion[h] : 9;
+                int atk = (int)CALL(FN_HERO_ATK, (uint32_t)m) * (int)CALL(FN_HERO_ATK_PCT, (uint32_t)m) / 100;
+                if (atk <= 0) atk = a->atk / n;
+                int d = atk - def;
+                if (d > 0) d += d * (int)CALL(FN_RACE_ATK, CALL(FN_HERO), (uint32_t)e->race) / 100;
+                total += d > 1 ? d : 1;
+            }
+        } else {
+            int d = a->atk - def;
+            total += d > 1 ? d : 1;
+        }
+    }
+    return total;
+}
+
+static void scale_enemies(void) {
+    const actor *ref = NULL;
+    bool boss = false;
+    for (int i = 0; i < B.n; i++) {
+        if (B.a[i].party) continue;
+        if (!ref) ref = &B.a[i];
+        boss |= B.a[i].boss;
+        if (B.a[i].boss) ref = &B.a[i];
+    }
+    if (!ref || ref->ohpmax <= 0) return;
+    int64_t want = (int64_t)party_round_damage(ref) * (boss ? ROUNDS_BOSS : ROUNDS_NORMAL);
+    int64_t pm = want * 1000 / ref->ohpmax; // 천분율
+    if (pm < HP_SCALE_MIN * 10) pm = HP_SCALE_MIN * 10;
+    if (pm > HP_SCALE_MAX * 10) pm = HP_SCALE_MAX * 10;
+    for (int i = 0; i < B.n; i++) {
+        actor *a = &B.a[i];
+        if (a->party) continue;
+        a->hpmax = (int)(a->ohpmax * pm / 1000);
+        a->hp = (int)(a->ohp * pm / 1000);
+        if (a->hpmax < 1) a->hpmax = 1;
+        if (a->hp < 1 && a->ohp > 0) a->hp = 1;
+    }
+    fprintf(stderr, "[turn] 적 HP 배율 %d.%d%%(파티 한 바퀴 %d, 기준 %s HP %d, 목표 %d바퀴)\n", (int)(pm / 10), (int)(pm % 10),
+            party_round_damage(ref), boss ? "보스" : "일반", ref->ohpmax, boss ? ROUNDS_BOSS : ROUNDS_NORMAL);
+}
+
 static void place(void) {
     int ne = 0, np = 0, W = B.w;
     for (int i = 0; i < B.n; i++) {
@@ -469,6 +525,7 @@ static void open_battle(uint32_t first, int kind) {
     add_hero();
     int mem[MAX_PARTY], nm = turn_party_members(mem); // 파티 편성(turnparty.c): 주인공 + 동료 최대 3명
     for (int i = 0; i < nm && i < MAX_PARTY - 1; i++) add_member(mem[i]);
+    scale_enemies();
     place();
     B.first_strike = kind == 2;
     B.ambushed = kind == 1;
