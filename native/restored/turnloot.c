@@ -100,7 +100,7 @@ static void draw(void) {
     int ly = y + 24;
     for (int i = 0; i < got_n; i++, ly += 15) {
         char s[80];
-        const char *tail = got_items[i].to == TO_STORE ? " (\xc3\xa2\xb0\xed\xb7\xce \xba\xb8\xb3\xbf)" : got_items[i].to == TO_LOST ? " (\xc0\xda\xb8\xae \xbe\xf8\xc0\xbd)" : ""; //  (창고로 보냄) /  (자리 없음)
+        const char *tail = got_items[i].to == TO_STORE ? " (\xc3\xa2\xb0\xed\xb7\xce \xba\xb8\xb3\xbf)" : got_items[i].to == TO_LOST ? " (\xb0\xa1\xb5\xe6\x20\xc2\xf7\xbc\xad\x20\xb9\xf6\xb7\xc1\xc1\xfc)" : ""; //  (창고로 보냄) /  (가득 차서 버려짐): 가방과 창고가 모두 차면 바닥에 두지 않고 버린다
         snprintf(s, sizeof s, "%s x%d%s", got_items[i].name, got_items[i].n, tail);
         uint32_t col = got_items[i].to == TO_BAG ? 0xffffff : got_items[i].to == TO_STORE ? 0x80d0ff : 0xff8080;
         turn_draw_text(x + 10, ly, pw - 16, s, col, 0);

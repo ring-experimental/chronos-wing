@@ -148,6 +148,20 @@ bool turn_test_ctrl(const char *cmd) {
         }
         return true;
     }
+    if (!strncmp(cmd, "texts", 5) || !strncmp(cmd, "say ", 4)) { // turn texts: 지금 맵 대사 중 턴제로 바꾼 글(파티추가, 스테이터스) 번호. turn say N: 그 글을 대사 창으로(0x11bde0)
+        uint32_t t = R32(R32(0x136d30) + 0x136cda + R32(0x136d34));
+        int n = (int)R32(t + 0x2c);
+        if (cmd[0] == 's') { CALL(0x11bde0, (uint32_t)atoi(cmd + 4), 0, 0); return true; }
+        for (int i = 0; i < n; i++) {
+            uint32_t len, h = CALL(0x136ccc, (uint32_t)i, 0);
+            (void)len;
+            if (!h) continue;
+            const char *txt = (const char *)c->m + R32(h) + 8;
+            if (strstr(txt, "\xc6\xc4\xc6\xbc\xc3\xdf\xb0\xa1") || strstr(txt, "\xbd\xba\xc5\xd7\xc0\xcc\xc5\xcd\xbd\xba")) // 파티추가 / 스테이터스
+                fprintf(stderr, "[turn] 글 %d/%d: %.60s\n", i, n, txt);
+        }
+        return true;
+    }
     if (!strncmp(cmd, "peek ", 5)) { // turn peek 주소 길이(16진). gNN이면 GOT+NN이 가리키는 값부터
         const char *a = cmd + 5;
         uint32_t addr = a[0] == 'g' ? got((uint32_t)strtoul(a + 1, NULL, 16)) : (uint32_t)strtoul(a, NULL, 16);
