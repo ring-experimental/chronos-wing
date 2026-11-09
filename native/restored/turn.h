@@ -79,3 +79,9 @@ void turn_member_stats(int i, member_stats *st);
 bool turn_menu_open(void);
 bool turn_menu_tick(void);
 bool turn_menu_key(int type, int code);
+
+// 짐가방(turnbag.c): 턴제에서는 127칸(원작 1바이트 커서의 한계), 10열 전체 화면
+enum { TURN_BAG_SLOTS = 127, TURN_BAG_COLS = 10, TURN_BAG_FILE_SIZE = 30000 };
+bool turn_bag_wide(void);
+int turn_bag_cols(void);
+int turn_bag_rows(void);

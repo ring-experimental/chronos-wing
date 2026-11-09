@@ -58,3 +58,7 @@
 276b4 turnparty.c wrap
 27318 turnparty.c wrap
 43404 turnequip.c wrap
+24c70 turnbag.c wrap
+72710 turnbag.c wrap
+39804 turnbag.c wrap
+3abc0 turnbag.c wrap

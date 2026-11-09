@@ -20,7 +20,7 @@ enum {
     FN_HERO = 0x147434, H_LEVEL = 0x101, H_CLASS = 0xb1, H_HP = 0xec, H_HPMAX = 0xf0, H_MP = 0x114, H_MPMAX = 0x118,
     H_EXP = 0xf4, FN_HERO_NEED = 0x12ebfc, FN_PATK = 0x1022c8, FN_MATK = 0x102348, FN_DEF = 0x101ef4, FN_DEF_ADD = 0x101fc0, FN_CRIT = 0x102280,
     KEY_UP = -1, KEY_DOWN = -2, KEY_LEFT = -3, KEY_RIGHT = -4, KEY_OK = -5, KEY_CLEAR = -16,
-    ROWS = 8, MAX_CAND = 40,
+    ROWS = 8, MAX_CAND = TURN_BAG_SLOTS + 40, // 가방 127칸 + 창고 장비 탭
 };
 
 typedef enum { M_NONE, M_LIST, M_MEMBER, M_PICK, M_TEAM } mode;

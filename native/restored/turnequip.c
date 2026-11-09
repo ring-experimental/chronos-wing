@@ -12,7 +12,8 @@
 void orig_f_43404(cpu_t *c);
 
 enum {
-    FN_BAG = 0x128f0c, BAG_LIST = 0x10, BAG_MAX = 36, GOT_STORAGE = 0x980, STORAGE_EQUIP_LIST = 0x14, STORAGE_MAX = 30,
+    FN_BAG = 0x128f0c, BAG_LIST = 0x10, FN_BAG_FREE = 0x13ad90, // 남은 칸(턴제 127칸, bag.c)
+    GOT_STORAGE = 0x980, STORAGE_EQUIP_LIST = 0x14, STORAGE_MAX = 30,
     LIST_FIRST = 0, LIST_COUNT = 8, NODE_NEXT = 4, NODE_ITEM = 0x10, ITEM_SLOT = 0x174, ITEM_WHERE = 0x176,
     WHERE_BAG = 2, WHERE_STORAGE = 4,
     FN_LIST_ADD = 0x13f10c, FN_STORAGE_COUNT = 0x13ca98, FN_STORAGE_ADD = 0x13cfc0,
@@ -118,7 +119,7 @@ static bool put_back(uint32_t it) {
     uint32_t node;
     if (find_in(gear_list(), it, &node)) unlink_item(gear_list(), node);
     W8(it + ITEM_SLOT, 0xff);
-    if ((int)R32(bag_list() + LIST_COUNT) < BAG_MAX) { W8(it + ITEM_WHERE, WHERE_BAG); CALL(FN_LIST_ADD, bag_list(), it); return true; }
+    if ((int8_t)CALL(FN_BAG_FREE, CALL(FN_BAG)) > 0) { W8(it + ITEM_WHERE, WHERE_BAG); CALL(FN_LIST_ADD, bag_list(), it); return true; }
     if ((int8_t)CALL(FN_STORAGE_COUNT, 0) < STORAGE_MAX) { W8(it + ITEM_WHERE, WHERE_STORAGE); CALL(FN_STORAGE_ADD, it, 0); return true; }
     CALL(FN_LIST_ADD, gear_list(), it); // 돌려놓을 곳이 없으면 그대로 입힌다
     return false;
@@ -126,7 +127,7 @@ static bool put_back(uint32_t it) {
 
 static bool room_for_one(void) {
     cpu_t *c = &cpu;
-    return (int8_t)CALL(FN_STORAGE_COUNT, 0) < STORAGE_MAX || (int)R32(bag_list() + LIST_COUNT) < BAG_MAX;
+    return (int8_t)CALL(FN_STORAGE_COUNT, 0) < STORAGE_MAX || (int8_t)CALL(FN_BAG_FREE, CALL(FN_BAG)) > 0;
 }
 
 // 입히기(it 0이면 벗기기). 실패하면 이유를 돌려준다(EUC-KR).
