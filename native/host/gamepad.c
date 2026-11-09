@@ -425,7 +425,9 @@ void gamepad_tick(void) {
 }
 
 // 조작 안내 글. 원본 형식은 [u8 개수][u16BE 길이][EUC-KR 글]의 반복이고 `|`, `q`는 색, `;`는 줄바꿈이다.
-enum { HELP_BASIC = 11, HELP_SKILL = 12 };
+enum { HELP_BASIC = 11, HELP_SKILL = 12, HELP_MEMBERS = 17, TIP_SOULLINK = 1, TIP_DEFENSE = 20 };
+// 턴제 모드의 동료육성 도움말(원본 HELP 17의 소울링크·네트워크 방어 문장을 파티 편성으로). ';'은 줄바꿈, '|'와 'q'는 색.
+#define TURN_HELP_MEMBERS "와일드윙에 합류한 동료들과;|<면담>q에서 파티추가를 하면;전투에 함께 나섭니다. 파티;는 주인공을 포함해 4명까지;이고, 파티원은 주인공과 같;은 경험치를, 대기 중인 동료;는 절반을 얻어 함께 성장합;니다. 동료는 레벨이 오르면;새 스킬을 배웁니다.;스킬마스터 리키의 레벨이 상;승하면 조합해줄 수 있는 주;인공의 특성이 늘어나고, 설계;사엔지나 상인 보우머 또한 ;조합해 줄 수 있는 장비스킨;등이 늘어나게 됩니다."
 #define EUC_KEY "\xc5\xb0" // 키
 
 static const uint8_t *out_data;
@@ -498,7 +500,9 @@ const uint8_t *gamepad_resource(const char *path, size_t *size) {
         *size = (size_t)fl;
         return out_data;
     }
-    if ((!help && !tip) || source == SOURCE_TOUCH) return NULL;
+    // 턴제 모드는 동료 안내(소울링크 → 파티 편성)를 바꾼다(본편에는 영향 없음). 그 밖에는 패드·키보드일 때 키 이름만 바꾼다.
+    bool turn = getenv("CHRONOS_TURN") != NULL;
+    if ((!help && !tip) || (source == SOURCE_TOUCH && !turn)) return NULL;
 
     FILE *f = fopen(path, "rb");
     if (!f) return NULL;
@@ -524,7 +528,11 @@ const uint8_t *gamepad_resource(const char *path, size_t *size) {
         memcpy(t, in + ip + 2, l);
         t[l] = 0;
         ip += 2 + l;
-        if (help && i == HELP_BASIC) basic_controls(t);
+        if (turn && help && i == HELP_MEMBERS) game_text(TURN_HELP_MEMBERS, t, TEXT_CAP);
+        else if (turn && tip && i == TIP_SOULLINK) game_text("동료들과 면담에서 파티추가를 하면 함께 싸우며 레벨을 올릴 수 있습니다.", t, TEXT_CAP);
+        else if (turn && tip && i == TIP_DEFENSE) game_text("동료들은 레벨이 오르면 전투에서 새 스킬을 쓸 수 있어요.", t, TEXT_CAP);
+        else if (source == SOURCE_TOUCH) {}
+        else if (help && i == HELP_BASIC) basic_controls(t);
         else if (help && i == HELP_SKILL) {
             char a[64], b[64], c[64], euc[TEXT_CAP];
             game_text(five, a, sizeof a);
