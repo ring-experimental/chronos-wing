@@ -1,53 +1,53 @@
 <rml>
 <head><link type="text/rcss" href="ui.rcss"/><title>pad</title></head>
 <body data-model="ui">
-<div id="root" data-if="pad_on || edit" data-style-opacity="edit ? 0.9 : alpha / 100">
-  <!-- g[번호]는 host/ui.cpp의 groups 순서다. 대사 중에는 OK 대신 하단 어디든 누르면 넘어가고 스킵, 자동, 기록만 남는다. 기록을 보는 동안에는 방향 패드와 기록 버튼만 남는다. 선택지와 메뉴를 다룰 때는 전부 보인다. 1, 3, 0은 스킬 단축키를 구매해야 보이고 하나씩 옮길 수 있다. 키는 게임 도움말의 기본 조작을 따른다. -->
-  <div id="tap" code="-5" data-if="dialog &amp;&amp; !log &amp;&amp; !edit"></div>
-  <div id="dpad" class="group" style="width:3em;height:3em;" data-if="edit || !dialog || log" data-style-left="g[0].left" data-style-top="g[0].top" data-style-font-size="g[0].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 0">
+<div id="root" data-style-opacity="edit ? 0.9 : alpha / 100">
+  <!-- 터치 기기(touch_ui)는 패드를 꺼도(pad_on 거짓) 설정 톱니(sys)를 남겨 다시 켤 수 있게 한다. g[번호]는 host/ui.cpp의 groups 순서다. 대사 중에는 OK 대신 하단 어디든 누르면 넘어가고 스킵, 자동, 기록만 남는다. 기록을 보는 동안에는 방향 패드와 기록 버튼만 남는다. 선택지와 메뉴를 다룰 때는 전부 보인다. 1, 3, 0은 스킬 단축키를 구매해야 보이고 하나씩 옮길 수 있다. 키는 게임 도움말의 기본 조작을 따른다. -->
+  <div id="tap" code="-5" data-if="pad_on &amp;&amp; dialog &amp;&amp; !log &amp;&amp; !edit"></div>
+  <div id="dpad" class="group" style="width:3em;height:3em;" data-if="edit || (pad_on &amp;&amp; (!dialog || log))" data-style-left="g[0].left" data-style-top="g[0].top" data-style-font-size="g[0].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 0">
     <div class="dial"></div>
     <div class="btn arrow up" code="-1" style="left:1em;top:0.05em;"></div>
     <div class="btn arrow down" code="-2" style="left:1em;top:1.95em;"></div>
     <div class="btn arrow left" code="-3" style="left:0.05em;top:1em;"></div>
     <div class="btn arrow right" code="-4" style="left:1.95em;top:1em;"></div>
   </div>
-  <div id="ok" class="group" style="width:1.6em;height:1.6em;" data-if="edit || !dialog" data-style-left="g[1].left" data-style-top="g[1].top" data-style-font-size="g[1].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 1">
+  <div id="ok" class="group" style="width:1.6em;height:1.6em;" data-if="edit || (pad_on &amp;&amp; (!dialog))" data-style-left="g[1].left" data-style-top="g[1].top" data-style-font-size="g[1].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 1">
     <div class="btn orb" code="-5"><span class="n">OK</span></div>
   </div>
-  <div id="skill" class="group" style="width:1.55em;height:2.75em;" data-if="edit || !dialog" data-style-left="g[2].left" data-style-top="g[2].top" data-style-font-size="g[2].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 2">
+  <div id="skill" class="group" style="width:1.55em;height:2.75em;" data-if="edit || (pad_on &amp;&amp; (!dialog))" data-style-left="g[2].left" data-style-top="g[2].top" data-style-font-size="g[2].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 2">
     <div class="btn skill" code="55" style="left:0;top:1.75em;"><span class="n">7</span></div>
     <div class="btn skill" code="57" style="left:0.55em;top:0;"><span class="n">9</span></div>
   </div>
-  <div id="aux" class="group" style="width:2.65em;height:0.8em;" data-if="edit || !dialog" data-style-left="g[3].left" data-style-top="g[3].top" data-style-font-size="g[3].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 3">
+  <div id="aux" class="group" style="width:2.65em;height:0.8em;" data-if="edit || (pad_on &amp;&amp; (!dialog))" data-style-left="g[3].left" data-style-top="g[3].top" data-style-font-size="g[3].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 3">
     <div class="btn small" code="-6" style="left:0em;"><span class="n">L</span></div>
     <div class="btn small" code="-7" style="left:0.85em;"><div class="icon i-save"></div></div>
     <div class="btn small" code="35" style="left:1.7em;"><div class="icon i-map"></div></div>
   </div>
-  <div id="sys" class="group" style="width:0.8em;height:0.8em;" data-if="edit || !dialog" data-style-left="g[4].left" data-style-top="g[4].top" data-style-font-size="g[4].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 4">
+  <div id="sys" class="group" style="width:0.8em;height:0.8em;" data-if="edit || ((pad_on || touch_ui) &amp;&amp; !dialog)" data-style-left="g[4].left" data-style-top="g[4].top" data-style-font-size="g[4].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 4">
     <div class="btn small" action="settings" style="left:0em;"><div class="icon i-gear"></div></div>
   </div>
-  <div id="skip" class="group" style="width:1.6em;height:0.8em;" data-if="edit || (dialog &amp;&amp; !log)" data-style-left="g[5].left" data-style-top="g[5].top" data-style-font-size="g[5].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 5">
+  <div id="skip" class="group" style="width:1.6em;height:0.8em;" data-if="edit || (pad_on &amp;&amp; (dialog &amp;&amp; !log))" data-style-left="g[5].left" data-style-top="g[5].top" data-style-font-size="g[5].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 5">
     <div class="btn pill" code="35"><span class="t">SKIP</span></div>
   </div>
-  <div id="item" class="group" style="width:1em;height:1em;" data-if="edit || !dialog" data-style-left="g[6].left" data-style-top="g[6].top" data-style-font-size="g[6].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 6">
+  <div id="item" class="group" style="width:1em;height:1em;" data-if="edit || (pad_on &amp;&amp; (!dialog))" data-style-left="g[6].left" data-style-top="g[6].top" data-style-font-size="g[6].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 6">
     <div class="btn item" code="42"><div class="icon i-bag"></div></div>
   </div>
-  <div id="menu" class="group" style="width:0.8em;height:0.8em;" data-if="edit || !dialog" data-style-left="g[7].left" data-style-top="g[7].top" data-style-font-size="g[7].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 7">
+  <div id="menu" class="group" style="width:0.8em;height:0.8em;" data-if="edit || (pad_on &amp;&amp; (!dialog))" data-style-left="g[7].left" data-style-top="g[7].top" data-style-font-size="g[7].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 7">
     <div class="btn small" code="-16"><div class="icon i-menu"></div></div>
   </div>
-  <div id="slot1" class="group" style="width:0.8em;height:0.8em;" data-if="edit || (!dialog &amp;&amp; shortcuts)" data-style-left="g[8].left" data-style-top="g[8].top" data-style-font-size="g[8].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 8">
+  <div id="slot1" class="group" style="width:0.8em;height:0.8em;" data-if="edit || (pad_on &amp;&amp; (!dialog &amp;&amp; shortcuts))" data-style-left="g[8].left" data-style-top="g[8].top" data-style-font-size="g[8].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 8">
     <div class="btn small" code="49"><span class="n">1</span></div>
   </div>
-  <div id="slot3" class="group" style="width:0.8em;height:0.8em;" data-if="edit || (!dialog &amp;&amp; shortcuts)" data-style-left="g[9].left" data-style-top="g[9].top" data-style-font-size="g[9].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 9">
+  <div id="slot3" class="group" style="width:0.8em;height:0.8em;" data-if="edit || (pad_on &amp;&amp; (!dialog &amp;&amp; shortcuts))" data-style-left="g[9].left" data-style-top="g[9].top" data-style-font-size="g[9].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 9">
     <div class="btn small" code="51"><span class="n">3</span></div>
   </div>
-  <div id="slot0" class="group" style="width:0.8em;height:0.8em;" data-if="edit || (!dialog &amp;&amp; shortcuts)" data-style-left="g[10].left" data-style-top="g[10].top" data-style-font-size="g[10].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 10">
+  <div id="slot0" class="group" style="width:0.8em;height:0.8em;" data-if="edit || (pad_on &amp;&amp; (!dialog &amp;&amp; shortcuts))" data-style-left="g[10].left" data-style-top="g[10].top" data-style-font-size="g[10].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 10">
     <div class="btn small" code="48"><span class="n">0</span></div>
   </div>
-  <div id="auto" class="group" style="width:1.6em;height:0.8em;" data-if="edit || (dialog &amp;&amp; !log)" data-style-left="g[11].left" data-style-top="g[11].top" data-style-font-size="g[11].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 11">
+  <div id="auto" class="group" style="width:1.6em;height:0.8em;" data-if="edit || (pad_on &amp;&amp; (dialog &amp;&amp; !log))" data-style-left="g[11].left" data-style-top="g[11].top" data-style-font-size="g[11].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 11">
     <div class="btn pill" action="auto" data-class-on="auto_on"><span class="t">AUTO</span></div>
   </div>
-  <div id="log" class="group" style="width:1.6em;height:0.8em;" data-if="edit || dialog" data-style-left="g[12].left" data-style-top="g[12].top" data-style-font-size="g[12].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 12">
+  <div id="log" class="group" style="width:1.6em;height:0.8em;" data-if="edit || (pad_on &amp;&amp; (dialog))" data-style-left="g[12].left" data-style-top="g[12].top" data-style-font-size="g[12].font" data-class-edit="edit" data-class-selected="edit &amp;&amp; selected == 12">
     <div class="btn pill" action="log" data-class-on="log"><span class="t">LOG</span></div>
   </div>
 </div>

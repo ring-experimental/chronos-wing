@@ -57,6 +57,7 @@ bool hud_top = false;
 // 데이터 모델 "ui"에 묶이는 값. 화면 표시는 문서의 data-* 바인딩이 결정한다.
 struct Model {
     bool pad_on = false, dialog = false, edit = false, shortcuts = false, auto_on = false, log = false;
+    bool touch = false; // 터치 기기(Android, --touch): 패드를 꺼도 설정 톱니를 남긴다
     int size = 100, alpha = 85, selected = -1;
     bool gamepad = false;
     int capture = -1; // 다음 버튼을 기다리는 맵핑 줄.
@@ -203,6 +204,7 @@ void bind_model() {
     m.Bind("edit", &model.edit);
     m.Bind("selected", &model.selected);
     m.Bind("pad_on", &model.pad_on);
+    m.Bind("touch_ui", &model.touch);
     m.Bind("alpha", &model.alpha);
     m.Bind("gamepad", &model.gamepad);
     m.Bind("capture", &model.capture);
@@ -390,10 +392,12 @@ extern "C" bool ui_init(SDL_Window *win, SDL_Renderer *ren, const char *ui_dir, 
     bind_model();
 #ifdef __ANDROID__
     load_config(true);
+    model.touch = true;
 #else
     load_config(false);
 #endif
-    if (force_pad) model.pad_on = true;
+    if (force_pad) model.pad_on = model.touch = true;
+    if (getenv("CHRONOS_TOUCH_UI")) model.touch = true;
     update_sizes();
     pad = ctx->LoadDocument(dir + "/pad.rml");
     settings = ctx->LoadDocument(dir + "/settings.rml");
@@ -409,7 +413,7 @@ extern "C" bool ui_event(const SDL_Event *e) {
     bool modal = ui_modal();
     switch (e->type) {
     case SDL_EVENT_FINGER_DOWN: case SDL_EVENT_FINGER_MOTION: case SDL_EVENT_FINGER_UP: case SDL_EVENT_FINGER_CANCELED:
-        if (model.edit || (model.pad_on && !modal)) finger_event(e);
+        if (model.edit || ((model.pad_on || model.touch) && !modal)) finger_event(e); // 터치 기기는 패드를 꺼도 남는 설정 톱니를 누를 수 있게 받는다(보이는 버튼만 맞는다)
         return true;
     case SDL_EVENT_MOUSE_MOTION: case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: {
         if (!modal) return false;
