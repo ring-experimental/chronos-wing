@@ -106,6 +106,20 @@ bool turn_test_ctrl(const char *cmd) {
         fprintf(stderr, "[turn] 지급 %d/%d x%d -> %u\n", k, id, n, r);
         return true;
     }
+    if (!strncmp(cmd, "drop ", 5)) { // turn drop 종류 id 수: 주인공 자리에 드랍 만들기(0x117d7c, 턴제면 바로 가방)
+        int k = 0, id = 0, n = 1;
+        sscanf(cmd + 5, "%d %d %d", &k, &id, &n);
+        uint32_t h = CALL(0x147434);
+        for (int i = 0; i < n; i++) CALL(0x117d7c, R32(h + 8), R32(h + 0xc), (uint32_t)k, (uint32_t)id);
+        return true;
+    }
+    if (!strncmp(cmd, "pouch ", 6)) { // turn pouch 종류 id 수: 허리주머니에 넣기(0x13b52c, bag.c)
+        int k = 0, id = 0, n = 1;
+        sscanf(cmd + 6, "%d %d %d", &k, &id, &n);
+        uint32_t r = CALL(0x13b52c, CALL(0x128f30), k, id, n);
+        fprintf(stderr, "[turn] 허리주머니 %d/%d x%d -> %u\n", k, id, n, r);
+        return true;
+    }
     if (!strncmp(cmd, "count ", 6)) { // turn count 종류 id: 조건 2와 같은 가방 수량(0x12b4d0)
         int k = 0, id = 0;
         sscanf(cmd + 6, "%d %d", &k, &id);

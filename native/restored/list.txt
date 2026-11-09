@@ -49,3 +49,4 @@
 48bfc turnbattle.c wrap
 4de84 turnbattle.c wrap
 35a04 turnbattle.c wrap
+17d7c turnloot.c wrap
