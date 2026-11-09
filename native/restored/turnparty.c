@@ -13,6 +13,7 @@ void orig_f_2eb44(cpu_t *c);
 void orig_f_5bd54(cpu_t *c);
 void orig_f_5bf84(cpu_t *c);
 void orig_f_276b4(cpu_t *c);
+void orig_f_27318(cpu_t *c);
 
 enum {
     MEMBERS = 0x1a9e58, MEMBER_SIZE = 0x74, MEMBER_COUNT = 8,
@@ -30,6 +31,7 @@ enum {
 static const uint8_t JOIN_VAR[MEMBER_COUNT] = {0x03, 0x03, 0x03, 0x03, 0x07, 0x05, 0x05, 0x0f}; // 엔지, 레이, 리키, 후거스, 보우머, 쟝, 펭, 팡
 
 static int party[PARTY_MAX], party_n = -1; // -1: 아직 안 읽음
+static bool fresh;   // 게임 데이터 초기화(0x127318) 뒤 세이브 읽기가 없었다 = 새 게임. 턴제 모드는 새 게임 기준(사용자 결정)이라 이전 TURNPARTY를 버린다
 static bool in_game; // 세이브를 읽었거나(0x1276b4) 게임 안에서 전투·경험치·메뉴가 있었다. 타이틀에서는 주인공 값이 기본값이라 아무것도 하지 않는다
 static unsigned seen;                      // 합류를 확인한 동료(레벨 맞춤을 한 번만 한다)
 
@@ -78,7 +80,7 @@ static void party_load(void) {
     file_path(p, sizeof p);
     party_n = 0;
     seen = 0;
-    FILE *f = fopen(p, "rb");
+    FILE *f = fresh ? NULL : fopen(p, "rb");
     uint8_t b[9];
     if (f && fread(b, 1, sizeof b, f) == sizeof b && !memcmp(b, "TP1", 3) && b[3] <= PARTY_MAX) {
         for (int i = 0; i < b[3]; i++) if (b[4 + i] < MEMBER_COUNT) party[party_n++] = b[4 + i];
@@ -108,8 +110,17 @@ void f_276b4(cpu_t *c) {
     orig_f_276b4(c);
     if (!turn_mode_on()) return;
     in_game = true;
+    fresh = false;
     party_n = -1;
     fprintf(stderr, "[turn] 파티: 세이브 읽음\n");
+}
+
+// 게임 데이터 초기화(새 게임과 세이브 읽기 앞 모두). 뒤에 세이브 읽기가 오지 않으면 새 게임이다.
+void f_27318(cpu_t *c) {
+    orig_f_27318(c);
+    if (!turn_mode_on()) return;
+    fresh = true;
+    party_n = -1;
 }
 
 void turn_party_tick(void) {

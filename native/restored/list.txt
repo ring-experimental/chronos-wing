@@ -57,3 +57,4 @@
 20cfc turnmenu.c wrap
 20d8c turnmenu.c wrap
 276b4 turnparty.c wrap
+27318 turnparty.c wrap
