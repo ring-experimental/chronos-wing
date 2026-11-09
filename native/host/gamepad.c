@@ -476,8 +476,55 @@ static void replace_key(char *s, const char *key, const char *utf8_label) {
     replace_all(s, from, label);
 }
 
+// 턴제 모드의 대사 바꾸기(사용자 결정: 소울링크 튜토리얼과 "장비는 창고에서만" 안내를 턴제 규칙으로, 본편 영향 없음).
+// 스크립트 글 표의 길이를 건드리지 않도록 새 글은 원래 글보다 짧게 쓰고 공백으로 채운다(바이트 길이 같음).
+static const struct { const char *file, *from, *to; } TURN_LINES[] = {
+    {"010", "지금 바로 리키를 {<면담>&을 통해 |소울링크& 하세요.", "지금 바로 리키를 {<면담>&을 통해 |파티추가& 하세요."},
+    {"010", "초반에는 리키와의 |소울링크&가 필수적입니다.", "초반에는 리키와의 |파티추가&가 필수적입니다."},
+    {"010", "{장비장착&은 와일드윙 선장실의 {창고&에서만 가능하다는 것을 후거스가 알려줬을텐데?", "{장비장착&은 메뉴의 {스테이터스&에서 언제든 할 수 있다는 걸 몰라?"},
+    {"011", "장비장착은 {창고에서만 가능&하니 와일드윙 |선장실&로 가보렴.", "장비장착은 메뉴의 {스테이터스&에서 언제든 할 수 있단다."},
+    {"013", "초반에는 꼭 리키에게 |소울링크&를 하세요.", "초반에는 꼭 리키를 |파티추가& 하세요."},
+    {"013", "{리키&와 {소울링크&를 통해", "{리키&를 {파티추가&해서"},
+    {"132", "소울링크를 통;&해", "파티추가를 통;&해"},
+    {"203", "하지 않았다면, 창고에서 다시 장착할 수 있습니다.", "하지 않았다면, 메뉴의 스테이터스에서 장착하세요."},
+};
+
+static const uint8_t *turn_script(const char *path, size_t *size) {
+    size_t pl = strlen(path);
+    if (pl < 11 || strncmp(path + pl - 11, "/MAP/SC/", 8)) return NULL;
+    const char *num = path + pl - 3;
+    bool any = false;
+    for (size_t k = 0; k < sizeof TURN_LINES / sizeof TURN_LINES[0]; k++) any |= !strcmp(TURN_LINES[k].file, num);
+    if (!any) return NULL;
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long len = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint8_t *d = len > 0 ? malloc((size_t)len) : NULL;
+    if (!d || fread(d, 1, (size_t)len, f) != (size_t)len) { free(d); fclose(f); return NULL; }
+    fclose(f);
+    for (size_t k = 0; k < sizeof TURN_LINES / sizeof TURN_LINES[0]; k++) {
+        if (strcmp(TURN_LINES[k].file, num)) continue;
+        char from[256], to[256];
+        int fl = ime_utf8_to_euckr(TURN_LINES[k].from, from, sizeof from), tl = ime_utf8_to_euckr(TURN_LINES[k].to, to, sizeof to);
+        if (fl <= 0 || tl <= 0 || tl > fl) continue;
+        memset(to + tl, ' ', (size_t)(fl - tl));
+        for (long i = 0; i + fl <= len; i++)
+            if (!memcmp(d + i, from, (size_t)fl)) { memcpy(d + i, to, (size_t)fl); i += fl - 1; SDL_Log("턴제 대사 바꿈: SC/%s %ld", num, i); }
+    }
+    free((void *)out_data);
+    out_data = d;
+    *size = (size_t)len;
+    return out_data;
+}
+
 const uint8_t *gamepad_resource(const char *path, size_t *size) {
     size_t pl = strlen(path);
+    if (getenv("CHRONOS_TURN")) {
+        const uint8_t *t = turn_script(path, size);
+        if (t) return t;
+    }
     bool help = pl >= 9 && !strcmp(path + pl - 9, "/tdf/HELP");
     bool tip = pl >= 8 && !strcmp(path + pl - 8, "/tdf/TIP");
     bool body_font = pl >= 11 && !strcmp(path + pl - 11, "/ft/eng5x14");

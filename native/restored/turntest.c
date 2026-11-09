@@ -106,6 +106,20 @@ bool turn_test_ctrl(const char *cmd) {
         fprintf(stderr, "[turn] 지급 %d/%d x%d -> %u\n", k, id, n, r);
         return true;
     }
+    if (!strncmp(cmd, "npcopt ", 7)) { // turn npcopt 코드: 열린 NPC 선택지 첫 칸을 그 코드로(시험: 9 창고)
+        uint32_t o = got(0xe70);
+        fprintf(stderr, "[turn] NPC 선택지 %d개:", R8(o));
+        for (int i = 0; i < R8(o) && i < 8; i++) fprintf(stderr, " %d", R8(o + 0x2c + i));
+        fprintf(stderr, "\n");
+        W8(o + 0x2c, (uint8_t)atoi(cmd + 7));
+        return true;
+    }
+    if (!strncmp(cmd, "store ", 6)) { // turn store 종류 id: 창고에 넣기(0x13cc4c)
+        int k = 0, id = 0;
+        sscanf(cmd + 6, "%d %d", &k, &id);
+        fprintf(stderr, "[turn] 창고 %d/%d -> %u\n", k, id, CALL(0x13cc4c, CALL(0x13c6a4, k), k, id, 1));
+        return true;
+    }
     if (!strncmp(cmd, "drop ", 5)) { // turn drop 종류 id 수: 주인공 자리에 드랍 만들기(0x117d7c, 턴제면 바로 가방)
         int k = 0, id = 0, n = 1;
         sscanf(cmd + 5, "%d %d %d", &k, &id, &n);
