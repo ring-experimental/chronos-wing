@@ -204,7 +204,7 @@ static bool turn_enabled(void) {
 
 bool turn_mode_on(void) { return turn_enabled(); }
 
-bool turn_battle_open(void) { return B.phase != S_CLOSED || pending_monster || turn_loot_open(); }
+bool turn_battle_open(void) { return B.phase != S_CLOSED || pending_monster || turn_loot_open() || turn_menu_open(); }
 
 // ---- 게임 값 읽기 ----
 
@@ -365,34 +365,22 @@ static void add_hero(void) {
     a->obj = h + E_SPRITE; // 주인공 그림은 필드 개체의 것(H/S<클래스>, 장비 시트 4장)
 }
 
-// 동료 수치는 클라이언트에 없다. 장비를 따라 강해지도록 주인공 수치에 역할별 비율을 곱한다(정한 값).
-// 공격은 주인공 기본 공격 첫 타(원본 0x101ff4 × 0x102188), HP는 최대 HP, 방어는 장비 방어(0x101ef4), MP는 주인공 최대 MP의 1/3(최소 30).
-// 순서: 0 엔지(물리), 1 레이(힐), 2 리키(검, 둔화), 3 후거스(탱커), 4 보우머(버프), 5 쟝(둔화), 6 펭(화염), 7 팡(전격)
-static const struct { int atk, hp, def; } MEMBER_RATE[MEMBER_COUNT] = {
-    {100, 90, 90}, {60, 80, 80}, {75, 85, 85}, {70, 130, 130}, {65, 85, 85}, {95, 75, 70}, {95, 75, 70}, {95, 75, 70},
-};
-
+// 동료 수치는 클라이언트에 없다. 자기 장비와 레벨로 정한다(turnequip.c turn_member_stats, 사용자 결정).
 static void add_member(int i) {
     cpu_t *c = &cpu;
     uint32_t e = MEMBERS + (uint32_t)i * MEMBER_SIZE;
-    const actor *h = NULL;
-    for (int k = 0; k < B.n; k++) if (B.a[k].hero) h = &B.a[k];
     actor *a = new_actor();
     a->party = true;
     a->member = i;
     memcpy(a->name, gstr(e + MEMBER_NAME), 27);
-    a->level = R8(e + MEMBER_LEVEL);
-    if (a->level < 1) a->level = 1;
-    int hp = h ? h->hpmax : 100 + 40 * a->level, atk = h ? h->atk : 10 + 4 * a->level;
-    int pdef = (int)CALL(FN_HERO_DEF, 0), mdef = (int)CALL(FN_HERO_DEF, 1), mp = h ? h->mpmax / 3 : 0;
-    // 레벨 차 보정(정한 값): 주인공보다 레벨이 낮으면 (50+동료 레벨)/(50+주인공 레벨)만큼 약하다(대기 동료는 경험치를 절반만 받는다)
-    int lf = h ? (50 + a->level) * 100 / (50 + h->level) : 100;
-    if (lf > 100) lf = 100;
-    a->hp = a->hpmax = hp * MEMBER_RATE[i].hp / 100 * lf / 100;
-    a->atk = atk * MEMBER_RATE[i].atk / 100 * lf / 100;
-    a->pdef = pdef * MEMBER_RATE[i].def / 100 * lf / 100;
-    a->mdef = mdef * MEMBER_RATE[i].def / 100 * lf / 100;
-    a->mp = a->mpmax = mp > 30 ? mp : 30;
+    member_stats st;
+    turn_member_stats(i, &st);
+    a->level = st.level;
+    a->hp = a->hpmax = st.hp;
+    a->mp = a->mpmax = st.mp;
+    a->atk = st.atk;
+    a->pdef = st.pdef;
+    a->mdef = st.mdef;
     a->speed = 10 + a->level / 2;
     fprintf(stderr, "[turn] 동료 %d Lv%d HP %d 공격 %d 방어 %d/%d MP %d\n", i, a->level, a->hp, a->atk, a->pdef, a->mdef, a->mp);
     a->nskills = turn_member_skills(i, a->level, &a->basic, a->skills, MAX_SKILLS);
@@ -1423,6 +1411,7 @@ static void step(void) {
 void turn_battle_tick(void) {
     turn_test_tick();
     if (B.phase == S_CLOSED) turn_party_tick();
+    if (B.phase == S_CLOSED && turn_menu_tick()) return;
     if (B.phase == S_CLOSED && turn_loot_tick()) return;
     if (B.phase == S_CLOSED && blown_until) {
         cpu_t *c = &cpu;
@@ -1532,6 +1521,7 @@ static void menu_move(int d, int n) {
 }
 
 bool turn_battle_key(int type, int code) {
+    if (B.phase == S_CLOSED && turn_menu_open()) return turn_menu_key(type, code);
     if (B.phase == S_CLOSED && turn_loot_open()) return turn_loot_key(type, code);
     if (B.phase == S_CLOSED) return pending_monster != 0;
     if (type != 2) return true;

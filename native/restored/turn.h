@@ -59,3 +59,19 @@ bool turn_member_joined(int i);
 int turn_party_members(int *out);
 void turn_party_tick(void);
 bool turn_party_toggle(int i, const char **result);
+
+// 동료 장비와 능력치(turnequip.c)
+typedef struct { int level, hp, mp, atk, pdef, mdef; bool magic; } member_stats;
+int turn_equip_slot(int member, int s);
+uint32_t turn_equip_item(int member, int s);
+int turn_item_kind(uint32_t it);
+const char *turn_item_name(uint32_t it);
+bool turn_equip_fits(int member, int s, uint32_t it);
+int turn_equip_candidates(int member, int s, uint32_t *out, int max);
+void turn_equip_set(int member, int s, uint32_t it);
+void turn_member_stats(int i, member_stats *st);
+
+// 메뉴 개편(turnmenu.c)
+bool turn_menu_open(void);
+bool turn_menu_tick(void);
+bool turn_menu_key(int type, int code);

@@ -12,6 +12,7 @@
 void orig_f_2eb44(cpu_t *c);
 void orig_f_5bd54(cpu_t *c);
 void orig_f_5bf84(cpu_t *c);
+void orig_f_276b4(cpu_t *c);
 
 enum {
     MEMBERS = 0x1a9e58, MEMBER_SIZE = 0x74, MEMBER_COUNT = 8,
@@ -29,6 +30,7 @@ enum {
 static const uint8_t JOIN_VAR[MEMBER_COUNT] = {0x03, 0x03, 0x03, 0x03, 0x07, 0x05, 0x05, 0x0f}; // 엔지, 레이, 리키, 후거스, 보우머, 쟝, 펭, 팡
 
 static int party[PARTY_MAX], party_n = -1; // -1: 아직 안 읽음
+static bool in_game; // 세이브를 읽었거나(0x1276b4) 게임 안에서 전투·경험치·메뉴가 있었다. 타이틀에서는 주인공 값이 기본값이라 아무것도 하지 않는다
 static unsigned seen;                      // 합류를 확인한 동료(레벨 맞춤을 한 번만 한다)
 
 static uint32_t member(int i) { return MEMBERS + (uint32_t)i * MEMBER_SIZE; }
@@ -101,8 +103,17 @@ static void party_load(void) {
 static void ensure(void) { if (party_n < 0) party_load(); }
 
 // 매 틱(필드): 새로 합류한 동료를 찾아 레벨을 맞추고 자리가 있으면 넣는다.
+// 세이브 읽기 마지막 단계(동료 읽기 0x12751c 뒤 소울링크 다시 걸기). 끝나면 파티 정보를 새로 읽는다.
+void f_276b4(cpu_t *c) {
+    orig_f_276b4(c);
+    if (!turn_mode_on()) return;
+    in_game = true;
+    party_n = -1;
+    fprintf(stderr, "[turn] 파티: 세이브 읽음\n");
+}
+
 void turn_party_tick(void) {
-    if (!turn_mode_on() || !save_dir[0]) return;
+    if (!turn_mode_on() || !save_dir[0] || !in_game) return;
     ensure();
     bool changed = false;
     for (int i = 0; i < MEMBER_COUNT; i++) {
@@ -117,6 +128,7 @@ void turn_party_tick(void) {
 
 // 전투 파티(합류한 동료만, 편성 순서)
 int turn_party_members(int *out) {
+    in_game = true;
     ensure();
     int n = 0;
     for (int k = 0; k < party_n; k++) if (turn_member_joined(party[k])) out[n++] = party[k];
@@ -147,6 +159,7 @@ void f_2eb44(cpu_t *c) {
     uint32_t hero = c->r[0];
     int amount = (int)c->r[1];
     if (!turn_mode_on() || (CALL(FN_NETWORK) & 0xff)) { orig_f_2eb44(c); return; }
+    in_game = true;
     ensure();
     uint32_t link = R32(hero + H_LINK);
     W32(hero + H_LINK, 0);
