@@ -281,7 +281,8 @@ bool turn_menu_key(int type, int code) {
         else if (down) M.cursor = (M.cursor + 1) % n;
         else if (back) M.mode = M_MEMBER;
         else if (ok) {
-            turn_equip_set(M.member, M.slot, M.cursor ? M.cand[M.cursor - 1] : 0);
+            const char *why = turn_equip_set(M.member, M.slot, M.cursor ? M.cand[M.cursor - 1] : 0);
+            if (why) snprintf(M.note, sizeof M.note, "%s", why);
             M.mode = M_MEMBER;
         }
         if (M.cursor < M.top) M.top = M.cursor;

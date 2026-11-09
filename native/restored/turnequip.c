@@ -1,23 +1,28 @@
-// 턴제 모드의 동료 장비와 능력치(사용자 결정 2026-11-09: 동료도 주인공과 같은 장비 칸, 능력치는 자기 장비 + 레벨, 무기는 역할별 한 종류).
-// 장착 표시는 원본처럼 아이템 +0x174(칸 번호, -1 없음)에 둔다. 동료 칸은 16 + 6×동료 + 칸(16~63)이라 원작 주인공(0~5)·선원장비(6~15)와 겹치지 않고,
-// 가방·창고 저장(0x137b48)에 그대로 남는다. 장착 중인 아이템은 원본이 제작·판매 목록에서 빼고 가방에 E를 그린다.
-// 원본 장착 0x1205b8(칸, 아이템)은 칸 > 5를 선원장비(동료 표 +0x40)로 쓰므로 16 이상은 감싸서 직접 처리한다(창고 메뉴 '해제'가 이 경로).
+// 턴제 모드의 동료 장비와 능력치(사용자 결정 2026-11-09: 동료도 주인공과 같은 6칸, 능력치는 자기 장비 + 레벨, 무기는 역할별 한 종류, 기본 장비를 준다).
+// 동료가 입은 장비는 가방·창고 칸을 쓰지 않도록 자체 목록(원본 목록 구조, 0x13f10c로 넣는다)에 둔다. 칸은 아이템 +0x174 = 16 + 6×동료 + 칸.
+// 벗기면 가방(0x13f10c)으로, 차 있으면 창고 장비 탭(30칸, 0x13cfc0)으로 돌아간다. 목록에서 뺄 때 원본 0x13f0b8은 아이템을 풀어 버리므로 연결만 직접 끊는다. 입히는 후보는 가방과 창고의 장착하지 않은 장비.
+// 저장은 게임 저장 마지막 단계(0x143404(8))에 원본 목록 저장(0x1387e4)으로 TURNGEAR에, 읽기는 세이브 읽기 끝(turnparty.c의 0x1276b4)에서.
+// 기본 장비: 원작 장비 제작 0x16dfc8(스킨 + 스톤)으로 등급 0 장비를 만든다(무기·투구·갑옷), 장갑·신발은 원작 수련용(13/0, 14/0).
 // 근거는 work/turn-plan.md "동료 장비".
 #include "restored.h"
 #include "turn.h"
 #include <stdio.h>
 #include <stdlib.h>
 
-void orig_f_205b8(cpu_t *c);
+void orig_f_43404(cpu_t *c);
 
 enum {
-    FN_BAG = 0x128f0c, BAG_LIST = 0x10, GOT_STORAGE = 0x980, STORAGE_EQUIP_LIST = 0x14,
-    NODE_NEXT = 4, NODE_ITEM = 0x10, ITEM_SLOT = 0x174,
+    FN_BAG = 0x128f0c, BAG_LIST = 0x10, BAG_MAX = 36, GOT_STORAGE = 0x980, STORAGE_EQUIP_LIST = 0x14, STORAGE_MAX = 30,
+    LIST_FIRST = 0, LIST_COUNT = 8, NODE_NEXT = 4, NODE_ITEM = 0x10, ITEM_SLOT = 0x174, ITEM_WHERE = 0x176,
+    WHERE_BAG = 2, WHERE_STORAGE = 4,
+    FN_LIST_ADD = 0x13f10c, FN_STORAGE_COUNT = 0x13ca98, FN_STORAGE_ADD = 0x13cfc0,
+    FN_LIST_SAVE = 0x1387e4, FN_LIST_LOAD = 0x13881c, FN_READ_INT = 0x183cfc,
+    FN_NEW_ITEM = 0x137494, FN_FREE_ITEM = 0x1372b8, FN_CRAFT = 0x16dfc8, GOT_CRAFT_PAIR = 0xa24,
     FN_ITEM_KIND = 0x138410, FN_ITEM_NAME_PTR = 0x13a28c,
     FN_W_BASE = 0x13a4a8, FN_W_PHYS = 0x13a4dc, FN_W_MAGIC = 0x13a4f0, FN_REFINE = 0x13a5c4,
     FN_DEF_PHYS = 0x13a518, FN_DEF_MAGIC = 0x13a530,
     MEMBERS = 0x1a9e58, MEMBER_SIZE = 0x74, M_LEVEL = 0x35,
-    SLOT_BASE = 16, SLOTS = 6, MEMBER_COUNT = 8,
+    SLOT_BASE = 16, SLOTS = 6, MEMBER_COUNT = 8, GEAR_FILE_SIZE = 9000, SAVE_LAST_STEP = 8,
 };
 
 // 동료 무기 종류(원작 무기: 8 쌍수 격투, 9 양손 검, 10 마력 정령). 엔지·후거스 쌍수, 리키 양손(검을 든 그림), 나머지 마력.
@@ -28,35 +33,41 @@ static const struct { int atk, hp; } RATE[MEMBER_COUNT] = {
 };
 static const bool MAGIC[MEMBER_COUNT] = {false, true, false, false, true, true, true, true};
 
+static uint32_t gear; // 자체 목록(+0 처음, +4 끝, +8 개수)
+
+static uint32_t gear_list(void) {
+    cpu_t *c = &cpu;
+    if (!gear) { gear = heap_alloc(16); memset(c->m + gear, 0, 16); }
+    return gear;
+}
+
 int turn_equip_slot(int member, int s) { return SLOT_BASE + SLOTS * member + s; }
 
-static uint32_t first_node(uint32_t list) { cpu_t *c = &cpu; return R32(list); }
-
-// 가방과 창고 장비 탭의 아이템을 차례로 돌려준다(끝이면 0).
-typedef struct { int list; uint32_t node; } walker;
-static uint32_t next_item(walker *w) {
+// 목록에서 연결만 끊는다. 원본 0x13f0b8은 끊은 뒤 아이템을 풀어 버린다(0x146fc8). 노드가 곧 아이템이다(+0 앞, +4 뒤, 목록 +0 처음, +4 끝, +8 개수).
+static void unlink_item(uint32_t list, uint32_t node) {
     cpu_t *c = &cpu;
-    for (;;) {
-        if (!w->node) {
-            if (w->list == 0) w->node = first_node(CALL(FN_BAG) + BAG_LIST);
-            else if (w->list == 1) w->node = first_node(got(GOT_STORAGE) + STORAGE_EQUIP_LIST);
-            else return 0;
-            w->list++;
-            if (!w->node) continue;
-        } else {
-            w->node = R32(w->node + NODE_NEXT);
-            if (!w->node) continue;
-        }
-        uint32_t it = R32(w->node + NODE_ITEM);
-        if (it) return it;
-    }
+    uint32_t prev = R32(node), next = R32(node + 4);
+    if (prev) W32(prev + 4, next); else W32(list, next);
+    if (next) W32(next, prev); else W32(list + 4, prev);
+    W32(node, 0);
+    W32(node + 4, 0);
+    W32(list + LIST_COUNT, R32(list + LIST_COUNT) - 1);
+}
+
+static uint32_t find_in(uint32_t list, uint32_t it, uint32_t *node_out) {
+    cpu_t *c = &cpu;
+    for (uint32_t n = R32(list + LIST_FIRST); n; n = R32(n + NODE_NEXT))
+        if (R32(n + NODE_ITEM) == it) { if (node_out) *node_out = n; return list; }
+    return 0;
 }
 
 uint32_t turn_equip_item(int member, int s) {
     cpu_t *c = &cpu;
-    walker w = {0, 0};
     int slot = turn_equip_slot(member, s);
-    for (uint32_t it; (it = next_item(&w));) if ((int8_t)R8(it + ITEM_SLOT) == slot) return it;
+    for (uint32_t n = R32(gear_list() + LIST_FIRST); n; n = R32(n + NODE_NEXT)) {
+        uint32_t it = R32(n + NODE_ITEM);
+        if (it && (int8_t)R8(it + ITEM_SLOT) == slot) return it;
+    }
     return 0;
 }
 
@@ -83,34 +94,147 @@ bool turn_equip_fits(int member, int s, uint32_t it) {
     return false;
 }
 
-// 칸에 넣을 수 있는 아이템(장착 중이 아닌 것). 반환은 개수.
+static uint32_t bag_list(void) { cpu_t *c = &cpu; return CALL(FN_BAG) + BAG_LIST; }
+static uint32_t storage_list(void) { cpu_t *c = &cpu; return got(GOT_STORAGE) + STORAGE_EQUIP_LIST; }
+
+// 칸에 넣을 수 있는 아이템(가방과 창고 장비 탭, 장착 중이 아닌 것). 반환은 개수.
 int turn_equip_candidates(int member, int s, uint32_t *out, int max) {
     cpu_t *c = &cpu;
-    walker w = {0, 0};
     int n = 0;
-    for (uint32_t it; (it = next_item(&w)) && n < max;)
-        if ((int8_t)R8(it + ITEM_SLOT) < 0 && turn_equip_fits(member, s, it)) out[n++] = it;
+    uint32_t lists[2] = {storage_list(), bag_list()};
+    for (int l = 0; l < 2; l++)
+        for (uint32_t nd = R32(lists[l] + LIST_FIRST); nd && n < max; nd = R32(nd + NODE_NEXT)) {
+            uint32_t it = R32(nd + NODE_ITEM);
+            if (it && (int8_t)R8(it + ITEM_SLOT) < 0 && turn_equip_fits(member, s, it)) out[n++] = it;
+        }
     return n;
 }
 
-void turn_equip_set(int member, int s, uint32_t it) {
+// 벗긴 장비를 가방(차 있으면 창고 장비 탭)으로 돌려보낸다. 둘 다 차 있으면 거짓.
+static bool put_back(uint32_t it) {
     cpu_t *c = &cpu;
-    uint32_t old = turn_equip_item(member, s);
-    if (old) W8(old + ITEM_SLOT, 0xff);
-    if (it) W8(it + ITEM_SLOT, (uint8_t)turn_equip_slot(member, s));
-    fprintf(stderr, "[turn] 장비: 동료 %d 칸 %d %08x → %08x\n", member, s, old, it);
+    uint32_t node;
+    if (find_in(gear_list(), it, &node)) unlink_item(gear_list(), node);
+    W8(it + ITEM_SLOT, 0xff);
+    if ((int)R32(bag_list() + LIST_COUNT) < BAG_MAX) { W8(it + ITEM_WHERE, WHERE_BAG); CALL(FN_LIST_ADD, bag_list(), it); return true; }
+    if ((int8_t)CALL(FN_STORAGE_COUNT, 0) < STORAGE_MAX) { W8(it + ITEM_WHERE, WHERE_STORAGE); CALL(FN_STORAGE_ADD, it, 0); return true; }
+    CALL(FN_LIST_ADD, gear_list(), it); // 돌려놓을 곳이 없으면 그대로 입힌다
+    return false;
 }
 
-// 원본 장착(칸, 아이템). 칸 16 이상은 동료 장비라 직접 처리한다(아이템 0이면 해제).
-void f_205b8(cpu_t *c) {
-    int slot = (int8_t)c->r[0];
-    uint32_t it = c->r[1];
-    if (slot >= SLOT_BASE && slot < SLOT_BASE + SLOTS * MEMBER_COUNT) {
-        turn_equip_set((slot - SLOT_BASE) / SLOTS, (slot - SLOT_BASE) % SLOTS, it);
-        return;
-    }
-    orig_f_205b8(c);
+static bool room_for_one(void) {
+    cpu_t *c = &cpu;
+    return (int8_t)CALL(FN_STORAGE_COUNT, 0) < STORAGE_MAX || (int)R32(bag_list() + LIST_COUNT) < BAG_MAX;
 }
+
+// 입히기(it 0이면 벗기기). 실패하면 이유를 돌려준다(EUC-KR).
+const char *turn_equip_set(int member, int s, uint32_t it) {
+    cpu_t *c = &cpu;
+    uint32_t old = turn_equip_item(member, s);
+    if (old == it) return NULL;
+    if (old && !it && !room_for_one()) return "\xc3\xa2\xb0\xed\xbf\xcd \xb0\xa1\xb9\xe6\xc0\xcc \xb0\xa1\xb5\xe6 \xc3\xa1\xb4\xd9"; // 창고와 가방이 가득 찼다
+    if (it) { // 가방이나 창고에서 꺼낸다(그 자리가 비므로 바꿔 입을 때 돌려놓을 곳이 생긴다)
+        uint32_t node, l = find_in(storage_list(), it, &node);
+        if (!l) l = find_in(bag_list(), it, &node);
+        if (!l) return "\xc0\xe5\xba\xf1\xb8\xa6 \xc3\xa3\xc1\xf6 \xb8\xf8\xc7\xdf\xb4\xd9"; // 장비를 찾지 못했다
+        unlink_item(l, node);
+    }
+    if (old) put_back(old);
+    if (it) {
+        W8(it + ITEM_SLOT, (uint8_t)turn_equip_slot(member, s));
+        CALL(FN_LIST_ADD, gear_list(), it);
+    }
+    fprintf(stderr, "[turn] 장비: 동료 %d 칸 %d %08x → %08x\n", member, s, old, it);
+    return NULL;
+}
+
+// ---- 기본 장비 ----
+
+// 원작 제작과 같은 순서(0x13dd94): 스킨(종류-5, 0) + 스톤으로 0x16dfc8(1 = 창고에 넣지 않음). 무작위 옵션은 지운다.
+static uint32_t craft(int kind, int stone_kind, int stone_id) {
+    cpu_t *c = &cpu;
+    uint32_t pair = got(GOT_CRAFT_PAIR);
+    uint32_t skin = CALL(FN_NEW_ITEM, 0xffffffffu, (uint32_t)(kind - 5), 0, 1);
+    uint32_t stone = CALL(FN_NEW_ITEM, 0xffffffffu, (uint32_t)stone_kind, (uint32_t)stone_id, 1);
+    W32(pair, skin);
+    W32(pair + 4, stone);
+    uint32_t it = CALL(FN_CRAFT, 1);
+    CALL(FN_FREE_ITEM, skin);
+    CALL(FN_FREE_ITEM, stone);
+    W32(pair, 0);
+    W32(pair + 4, 0);
+    if (it) {
+        W8(it + 0x177, 0);
+        for (int k = 0; k < 4; k++) W8(it + 0x178 + k, 0xff);
+        W8(it + 0x17d, 0);
+    }
+    return it;
+}
+
+static void wear(int member, int s, uint32_t it) {
+    cpu_t *c = &cpu;
+    if (!it) return;
+    W8(it + ITEM_SLOT, (uint8_t)turn_equip_slot(member, s));
+    CALL(FN_LIST_ADD, gear_list(), it);
+}
+
+// 등급 0 기본 장비(정한 값): 쌍수·양손은 파워젬(1,0), 마력은 무골(2,14), 투구·갑옷은 기본스톤(0,0), 장갑·신발은 수련용(13/0, 14/0). 악세서리는 없다.
+void turn_equip_give_basic(int member) {
+    cpu_t *c = &cpu;
+    for (int s = 0; s < 5; s++) if (turn_equip_item(member, s)) return; // 이미 입은 것이 있으면 주지 않는다
+    int wk = WEAPON_KIND[member];
+    wear(member, 0, wk == 10 ? craft(10, 2, 14) : craft(wk, 1, 0));
+    wear(member, 1, craft(11, 0, 0));
+    wear(member, 2, craft(12, 0, 0));
+    wear(member, 3, CALL(FN_NEW_ITEM, 2, 13, 0, 1));
+    wear(member, 4, CALL(FN_NEW_ITEM, 2, 14, 0, 1));
+    fprintf(stderr, "[turn] 장비: 동료 %d 기본 장비\n", member);
+}
+
+// ---- 저장과 읽기 ----
+
+static void gear_path(char *out, size_t cap) { snprintf(out, cap, "%s/TURNGEAR", save_dir); }
+
+void turn_equip_reset(void) {
+    cpu_t *c = &cpu;
+    memset(c->m + gear_list(), 0, 16); // 새 게임·읽기 전: 이전 목록은 버린다(아이템 풀은 게임 초기화가 비운다)
+}
+
+void turn_equip_load(void) {
+    cpu_t *c = &cpu;
+    turn_equip_reset();
+    char p[1100];
+    gear_path(p, sizeof p);
+    FILE *f = fopen(p, "rb");
+    if (!f) return;
+    uint32_t buf = heap_alloc(GEAR_FILE_SIZE);
+    size_t n = fread(c->m + buf, 1, GEAR_FILE_SIZE, f);
+    fclose(f);
+    if (n == GEAR_FILE_SIZE && (int)CALL(FN_READ_INT, buf, 0) > 0) CALL(FN_LIST_LOAD, gear_list(), buf, 0);
+    heap_free(buf);
+    fprintf(stderr, "[turn] 장비: 읽음 %d개\n", (int)R32(gear_list() + LIST_COUNT));
+}
+
+static void gear_save(void) {
+    cpu_t *c = &cpu;
+    uint32_t buf = heap_alloc(GEAR_FILE_SIZE);
+    memset(c->m + buf, 0xff, GEAR_FILE_SIZE);
+    CALL(FN_LIST_SAVE, gear_list(), buf, 0);
+    char p[1100];
+    gear_path(p, sizeof p);
+    FILE *f = fopen(p, "wb");
+    if (f) { fwrite(c->m + buf, 1, GEAR_FILE_SIZE, f); fclose(f); }
+    heap_free(buf);
+}
+
+// 게임 저장 단계(0x143404). 마지막 단계(8, 동료 저장)에서 동료 장비와 파티도 저장한다.
+void f_43404(cpu_t *c) {
+    int step = (uint8_t)c->r[0];
+    orig_f_43404(c);
+    if (step == SAVE_LAST_STEP && turn_mode_on()) { gear_save(); turn_party_save(); fprintf(stderr, "[turn] 장비·파티 저장\n"); }
+}
+
+// ---- 능력치 ----
 
 // 동료 능력치(턴제 전투와 스테이터스 화면). 공격은 원작 주인공 식(0x101ff4)과 같은 꼴: (기본 + 물리/마도 보정) × ((제련+20)/20),
 // 레벨이 오를수록 (100+레벨)%로 늘고 역할 비율을 곱한다. 무기가 없으면 3 + 레벨. 방어는 투구·갑옷·장갑·신발 합(0x101ef4와 같이 갑옷 제련×2).
@@ -138,4 +262,47 @@ void turn_member_stats(int i, member_stats *st) {
     }
     st->hp = (400 + lv * 12) * RATE[i].hp / 100;
     st->mp = 60 + lv * 4;
+}
+
+// ---- 창고 메뉴에서 장비 기능 빼기(사용자 결정: 장착·탈착은 메뉴의 장비 화면에서만) ----
+// 동작 목록 0x13b9f0(탭)은 got(0x980) +0x44 개수, +0x45~ 동작 번호를 채운다. 장비 탭(0) 싱글에서 8 장착하기와 0xc 해제를 뺀다.
+// 라벨은 0x13c0e4가 따로 만들어 0x1724f8(got(0x1e8), 라벨 5개)로 그린다. 같은 경우에 남은 동작에 맞는 라벨을 직접 넘긴다.
+void orig_f_3b9f0(cpu_t *c);
+void orig_f_3c0e4(cpu_t *c);
+enum { ST_COUNT_OFF = 0x44, ST_ACTIONS = 0x45, ST_NETWORK = 0x65, ST_TAB = 0x10, ACT_EQUIP = 8, ACT_UNEQUIP = 0xc,
+       ACT_INFO = 9, ACT_SELL = 10, ACT_DROP = 0xb, GOT_L_INFO = 0x9ac, GOT_L_SELL = 0x9bc, GOT_L_DROP = 0x9b0,
+       GOT_STORE_POPUP = 0x1e8, FN_POPUP_DRAW = 0x1724f8 };
+
+static bool storage_equip_tab(void) {
+    cpu_t *c = &cpu;
+    uint32_t s = got(GOT_STORAGE);
+    return turn_mode_on() && !R8(s + ST_NETWORK) && !R8(s + ST_TAB);
+}
+
+void f_3b9f0(cpu_t *c) {
+    int tab = (int8_t)c->r[0];
+    orig_f_3b9f0(c);
+    if (!turn_mode_on() || tab != 0) return;
+    uint32_t s = got(GOT_STORAGE);
+    if (R8(s + ST_NETWORK)) return;
+    int n = (int8_t)R8(s + ST_COUNT_OFF), k = 0;
+    for (int i = 0; i < n; i++) {
+        uint8_t a = R8(s + ST_ACTIONS + i);
+        if (a != ACT_EQUIP && a != ACT_UNEQUIP) W8(s + ST_ACTIONS + k++, a);
+    }
+    W8(s + ST_COUNT_OFF, (uint8_t)k);
+}
+
+void f_3c0e4(cpu_t *c) {
+    if (!storage_equip_tab()) { orig_f_3c0e4(c); return; }
+    uint32_t s = got(GOT_STORAGE);
+    static uint32_t labels;
+    if (!labels) labels = heap_alloc(20);
+    int n = (int8_t)R8(s + ST_COUNT_OFF);
+    for (int i = 0; i < 5; i++) {
+        uint8_t a = i < n ? R8(s + ST_ACTIONS + i) : 0;
+        uint32_t l = a == ACT_INFO ? got(GOT_L_INFO) : a == ACT_SELL ? got(GOT_L_SELL) : a == ACT_DROP ? got(GOT_L_DROP) : 0;
+        W32(labels + 4 * i, l);
+    }
+    CALL(FN_POPUP_DRAW, got(GOT_STORE_POPUP), labels);
 }

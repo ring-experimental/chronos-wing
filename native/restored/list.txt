@@ -53,8 +53,10 @@
 2eb44 turnparty.c wrap
 5bd54 turnparty.c wrap
 5bf84 turnparty.c wrap
-205b8 turnequip.c wrap
 20cfc turnmenu.c wrap
 20d8c turnmenu.c wrap
 276b4 turnparty.c wrap
 27318 turnparty.c wrap
+43404 turnequip.c wrap
+3b9f0 turnequip.c wrap
+3c0e4 turnequip.c wrap

@@ -1,5 +1,5 @@
 // 턴제 모드의 파티 편성. 원작 소울링크(동료 한 명이 주인공과 같은 경험치를 받음)를 "파티 추가"로 바꾼다.
-// - 파티는 주인공 + 동료 최대 3명. 저장은 세이브 폴더의 TURNPARTY(원작 +0 링크 바이트는 로드 때 한 명만 남으므로 쓰지 않는다).
+// - 파티는 주인공 + 동료 최대 3명. 저장은 게임 저장 때 세이브 폴더의 TURNPARTY(원작 +0 링크 바이트는 로드 때 한 명만 남으므로 쓰지 않는다).
 // - 경험치(0x12eb44 감싸기): 파티원은 주인공과 같은 양, 합류했지만 대기 중인 동료는 절반(사용자 결정 2026-11-09).
 // - 합류할 때 동료 레벨이 주인공보다 낮으면 주인공 레벨로 맞춘다(사용자 결정). 자리가 있으면 파티에 넣는다.
 // - 비공정 면담의 소울링크 버튼은 "파티추가"/"파티제외"가 된다(0x15bf84 그리기 전 글을 바꾸고, 0x15bd54 확인 처리를 가로챈다).
@@ -47,7 +47,8 @@ bool turn_member_joined(int i) {
 static void file_path(char *out, size_t cap) { snprintf(out, cap, "%s/TURNPARTY", save_dir); }
 
 // 형식: "TP1" 개수 동료번호×3 합류확인(2바이트)
-static void party_save(void) {
+void turn_party_save(void) {
+    if (party_n < 0) return;
     char p[1100];
     file_path(p, sizeof p);
     FILE *f = fopen(p, "wb");
@@ -95,9 +96,9 @@ static void party_load(void) {
             if (!turn_member_joined(i)) continue;
             seen |= 1u << i;
             catch_up(i);
+            turn_equip_give_basic(i);
             if (party_n < PARTY_MAX && !in_party(i)) party[party_n++] = i;
         }
-        party_save();
     }
     if (f) fclose(f);
 }
@@ -112,6 +113,7 @@ void f_276b4(cpu_t *c) {
     in_game = true;
     fresh = false;
     party_n = -1;
+    turn_equip_load();
     fprintf(stderr, "[turn] 파티: 세이브 읽음\n");
 }
 
@@ -121,6 +123,7 @@ void f_27318(cpu_t *c) {
     if (!turn_mode_on()) return;
     fresh = true;
     party_n = -1;
+    turn_equip_reset();
 }
 
 void turn_party_tick(void) {
@@ -131,10 +134,11 @@ void turn_party_tick(void) {
         if ((seen >> i & 1) || !turn_member_joined(i)) continue;
         seen |= 1u << i;
         catch_up(i);
+        turn_equip_give_basic(i);
         if (party_n < PARTY_MAX && !in_party(i)) party[party_n++] = i;
         changed = true;
     }
-    if (changed) party_save();
+    (void)changed; // 파티와 장비는 게임을 저장할 때 같이 저장한다(turnequip.c 0x143404)
 }
 
 // 전투 파티(합류한 동료만, 편성 순서)
@@ -159,7 +163,6 @@ bool turn_party_toggle(int i, const char **result) {
         party[party_n++] = i;
         *result = "\xc6\xc4\xc6\xbc\xbf\xa1 \xb3\xd6\xbe\xfa\xbd\xc0\xb4\xcf\xb4\xd9"; // 파티에 넣었습니다
     }
-    party_save();
     return true;
 }
 
