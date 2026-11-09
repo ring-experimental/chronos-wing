@@ -187,7 +187,7 @@ void f_3aa74(cpu_t *c) {
     uint32_t bag = CALL(FN_BAG);
     bool over = (int)R32(bag + BAG_LIST_COUNT) > BAG_SLOTS;
     if (turn_bag_wide()) turn_bag_save(c, buffer, bag, erase);
-    // 본편 파일에는 36칸까지만 들어간다. 넘치면 본편 BAGSAVE는 빈 가방으로 쓴다(턴제는 TURNBAG을 읽는다).
+    // BAGSAVE에는 36칸까지만 들어간다. 넘치면 빈 가방으로 쓴다(턴제는 전용 폴더의 TURNBAG을 읽는다).
     CALL(FN_MEMSET, buffer, 0xffffffffu, BAGSAVE_SIZE);
     if (!erase && !over) CALL(FN_LIST_SAVE, bag + BAG_LIST, buffer, 0);
     CALL(FN_FILE_WRITE, got(GOT_BAG_FILE), buffer, BAGSAVE_SIZE);

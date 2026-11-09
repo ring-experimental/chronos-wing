@@ -103,6 +103,14 @@ static void party_load(void) {
     if (f) fclose(f);
 }
 
+// 모드를 켜거나 끌 때(turnmode.c): 이전 판의 파티·장비 기억을 버린다.
+void turn_reset_state(void) {
+    party_n = -1;
+    in_game = false;
+    fresh = false;
+    turn_equip_reset();
+}
+
 static void ensure(void) { if (party_n < 0) party_load(); }
 
 // 매 틱(필드): 새로 합류한 동료를 찾아 레벨을 맞추고 자리가 있으면 넣는다.

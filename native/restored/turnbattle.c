@@ -204,9 +204,11 @@ static int check_exp;
 static int enabled = -1;
 
 static bool turn_enabled(void) {
-    if (enabled < 0) enabled = getenv("CHRONOS_TURN") != NULL;
+    if (enabled < 0) enabled = getenv("CHRONOS_TURN") != NULL; // 시험: 처음부터 켠다. 보통은 메인메뉴 "턴제 모드"가 켠다(turnmode.c)
     return enabled;
 }
+
+void turn_set_enabled(bool on) { enabled = on; }
 
 bool turn_mode_on(void) { return turn_enabled(); }
 

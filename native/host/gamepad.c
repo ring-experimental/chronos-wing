@@ -489,6 +489,8 @@ static const struct { const char *file, *from, *to; } TURN_LINES[] = {
     {"203", "하지 않았다면, 창고에서 다시 장착할 수 있습니다.", "하지 않았다면, 메뉴의 스테이터스에서 장착하세요."},
 };
 
+bool turn_mode_on(void);
+
 static const uint8_t *turn_script(const char *path, size_t *size) {
     size_t pl = strlen(path);
     if (pl < 11 || strncmp(path + pl - 11, "/MAP/SC/", 8)) return NULL;
@@ -521,7 +523,7 @@ static const uint8_t *turn_script(const char *path, size_t *size) {
 
 const uint8_t *gamepad_resource(const char *path, size_t *size) {
     size_t pl = strlen(path);
-    if (getenv("CHRONOS_TURN")) {
+    if (turn_mode_on()) {
         const uint8_t *t = turn_script(path, size);
         if (t) return t;
     }
@@ -548,7 +550,7 @@ const uint8_t *gamepad_resource(const char *path, size_t *size) {
         return out_data;
     }
     // 턴제 모드는 동료 안내(소울링크 → 파티 편성)를 바꾼다(본편에는 영향 없음). 그 밖에는 패드·키보드일 때 키 이름만 바꾼다.
-    bool turn = getenv("CHRONOS_TURN") != NULL;
+    bool turn = turn_mode_on();
     if ((!help && !tip) || (source == SOURCE_TOUCH && !turn)) return NULL;
 
     FILE *f = fopen(path, "rb");

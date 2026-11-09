@@ -1,6 +1,7 @@
 // 개발자모드. 메인메뉴의 빈 상태값 8을 환경설정과 같은 창으로 쓰고, 보상과 전투 함수에 배율을 건다.
 // 원본 0x1453bc, 0x1454f4, 0x145690, 0x145a88, 0x14609c를 감싸고 0x145b5c는 옮겼다. 값은 저장 폴더의 DEVMODE에 남는다.
 #include "panels.h"
+#include "turn.h"
 #include <stdio.h>
 
 void orig_f_453bc(cpu_t *c);
@@ -32,6 +33,7 @@ void orig_f_264c(cpu_t *c);
 #define T_HUD "\xbb\xf3\xc5\xc2\xc3\xa2" // 상태창
 #define T_BOTTOM "\xc7\xcf\xb4\xdc" // 하단
 #define T_TOP "\xbb\xf3\xb4\xdc" // 상단
+#define T_TURN "\xc5\xcf\xc1\xa6\x20\xb8\xf0\xb5\xe5" // 턴제 모드
 
 enum {
     GOT_SCREEN = 0x2c,
@@ -69,6 +71,8 @@ enum {
     ITEM_EXPERT = 1,
     ITEM_MUSIC = 14, // 원본 상태표(0~13) 밖의 번호다. 0x1453bc에 넘기기 전에 상태 8로 바꾼다.
     ITEM_REPLAY = 15,
+    ITEM_TURN = 16, // 턴제 모드(엔딩 뒤 해금, turnmode.c). 고르면 폴더를 바꾸고 스토리모드(상태 0)로 넘긴다
+    STATE_STORY = 0,
     PANEL_W = 0xb0,
     PANEL_H = 0xa0,
     ROW_H = 14,
@@ -229,6 +233,13 @@ void f_453bc(cpu_t *c) {
         next = ITEM_REPLAY;
         W8(got(GOT_MENU_ITEM), ITEM_REPLAY);
     }
+    if (next == ITEM_TURN) {
+        turn_begin();
+        c->r[0] = STATE_STORY;
+        orig_f_453bc(c);
+        return;
+    }
+    turn_back_to_main();
     active = next == ITEM_MUSIC ? &music_panel : next == ITEM_REPLAY ? &replay_panel : NULL;
     if (active) c->r[0] = STATE_DEV;
     orig_f_453bc(c);
@@ -269,21 +280,22 @@ void f_45a88(cpu_t *c) {
     else panel_key(key);
 }
 
-// 메인메뉴 좌우 이동. 플레이리스트와 스토리 다시보기를 네트워크 다음에, 개발자모드를 환경설정 다음에 끼운다. 열리지 않은 EXPERT는 건너뛴다(원본과 같다).
+// 메인메뉴 좌우 이동. 턴제 모드를 스토리모드 다음에(엔딩 뒤에만), 플레이리스트와 스토리 다시보기를 네트워크 다음에, 개발자모드를 환경설정 다음에 끼운다. 열리지 않은 EXPERT는 건너뛴다(원본과 같다).
 void f_4609c(cpu_t *c) {
-    static const signed char ORDER[] = {0, 1, 2, ITEM_MUSIC, ITEM_REPLAY, 3, 4, ITEM_DEV, 5, 6, 7};
+    static const signed char ORDER[] = {0, ITEM_TURN, 1, 2, ITEM_MUSIC, ITEM_REPLAY, 3, 4, ITEM_DEV, 5, 6, 7};
     enum { COUNT = sizeof ORDER };
     int key = (int)c->r[0], step = 0;
     if (key == -4 || key == -2 || key == 54 || key == 56) step = 1;
     else if (key == -3 || key == -1 || key == 50 || key == 52) step = -1;
     if (!step) { orig_f_4609c(c); return; }
+    turn_back_to_main();
     uint32_t item = got(GOT_MENU_ITEM);
     int current = (int8_t)R8(item), pos = 0;
     for (int i = 0; i < COUNT; i++)
         if (ORDER[i] == current) pos = i;
-    bool expert_open = (CALL(FN_EXPERT_OPEN) & 0xff) != 0;
+    bool expert_open = (CALL(FN_EXPERT_OPEN) & 0xff) != 0, turn_open = turn_unlocked();
     do pos = (pos + step + COUNT) % COUNT;
-    while (ORDER[pos] == ITEM_EXPERT && !expert_open);
+    while ((ORDER[pos] == ITEM_EXPERT && !expert_open) || (ORDER[pos] == ITEM_TURN && !turn_open));
     W8(item, ORDER[pos]);
 }
 
@@ -294,7 +306,7 @@ void f_45b5c(cpu_t *c) {
     int x = (int)R32(screen + 0x48) >> 1, y = half + ((height - half - 0x2d) >> 1) + 0x1c;
     int item = (int8_t)R8(got(GOT_MENU_ITEM));
     uint32_t text, len;
-    const char *added = item == ITEM_DEV ? T_MENU : item == ITEM_MUSIC ? music_panel.label : item == ITEM_REPLAY ? replay_panel.label : NULL;
+    const char *added = item == ITEM_TURN ? T_TURN : item == ITEM_DEV ? T_MENU : item == ITEM_MUSIC ? music_panel.label : item == ITEM_REPLAY ? replay_panel.label : NULL;
     if (added) {
         text = menu_guest_text(added);
         len = (uint32_t)strlen(added);

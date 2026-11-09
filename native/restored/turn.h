@@ -85,3 +85,9 @@ enum { TURN_BAG_SLOTS = 127, TURN_BAG_COLS = 10, TURN_BAG_FILE_SIZE = 30000 };
 bool turn_bag_wide(void);
 int turn_bag_cols(void);
 int turn_bag_rows(void);
+
+// 모드 켜고 끄기(turnmode.c)
+bool turn_unlocked(void);
+void turn_begin(void);
+void turn_back_to_main(void);
+void turn_reset_state(void);

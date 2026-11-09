@@ -3,6 +3,7 @@
 // 그 묶음이 퀘스트를 시작하면 저장 폴더의 REPLAY에 남긴다. 다시 볼 때는 값을 되돌리고 원본 스크립트 엔진이 같은 분기를 고르게 한다.
 // 재생 중에는 host_save_sandbox로 게임의 파일 쓰기를 버리고 끝나면 메뉴로 나간다. 다음 일반 시작이 저장 파일을 다시 읽으므로 메모리 변화도 남지 않는다.
 #include "panels.h"
+bool turn_mode_on(void);
 #include <stdio.h>
 
 void orig_f_19ce4(cpu_t *c);
@@ -292,10 +293,18 @@ static void unlock_from_save(void) {
     if (changed) save_file();
 }
 
+// 메인메뉴 턴제 모드 해금(turnmode.c): 최종장을 봤는가. 본편 세이브의 퀘스트 값으로도 소급한다.
+bool replay_final_seen(void) {
+    load_file();
+    if (!scenes[KEY_FINAL].unlocked) unlock_from_save();
+    return scenes[KEY_FINAL].unlocked != 0;
+}
+
 // 일반 플레이 기록
 
 static void begin_capture(int main) {
     cpu_t *c = &cpu;
+    if (turn_mode_on()) return; // 턴제 모드 플레이는 본편 장면 기록에 넣지 않는다
     uint32_t player = CALL(FN_PLAYER), world = got(GOT_WORLD);
     capture.map = (int32_t)R32(world + WORLD_MAP);
     capture.x = (int32_t)R32(player + PLAYER_X);
