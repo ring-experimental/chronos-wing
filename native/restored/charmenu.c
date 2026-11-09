@@ -15,6 +15,7 @@ enum {
     FN_POPUP_OPEN = 0x1722b0,
     FN_POPUP_CLOSE = 0x172330,
     FN_POPUP_SELECTED = 0x172338,
+    FN_CURSOR_SET = 0x11f018, POPUP_CURSOR = 0x18,
 };
 
 static bool confirming;
@@ -46,7 +47,12 @@ void f_457d8(cpu_t *c) {
 
 // 팝업을 그릴 때만 글과 선택지를 바꿔 넣는다.
 void f_45c34(cpu_t *c) {
-    if (!recover_popup(c)) { confirming = false; orig_f_45c34(c); return; }
+    static bool shown;
+    if (!recover_popup(c)) { confirming = false; shown = false; orig_f_45c34(c); return; }
+    // 들여오기/내보내기 팝업은 커서 값이 1(내보내기)로 열리는데 손가락은 들여오기에 그려져, 그대로 확인하면 내보내기가 됐다.
+    // 처음 그릴 때 커서를 0(들여오기)으로 맞춰 그림과 선택을 같게 한다. 덮어쓰기 확인 팝업은 원래대로 '아니오'(1)에서 시작한다.
+    if (!shown && !confirming) CALL(FN_CURSOR_SET, got(GOT_POPUP) + POPUP_CURSOR, 0);
+    shown = true;
     uint32_t text_slot = GOT + GOT_RECOVER_TEXT, text = R32(text_slot);
     uint32_t first = R32(YES_NO_LABELS), second = R32(YES_NO_LABELS + 4);
     W32(text_slot, savefile_text(confirming ? SAVE_TEXT_CONFIRM : SAVE_TEXT_CHOOSE));
