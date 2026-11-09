@@ -634,24 +634,21 @@ static void open_panel(void) {
     CALL(FN_CURSOR_RESET, got(GOT_CURSOR));
 }
 
+// 가로 가운데 정렬(사용자 결정 2026-11-09). 이어보기 줄은 값까지 한 글로 붙여 가운데에 둔다. 스크롤 막대 몫을 빼고 가운데를 잡는다.
 static void draw_row(int row, int x, int y, bool is_selected) {
     cpu_t *c = &cpu;
     uint32_t g = R32(got(GOT_SCREEN));
-    const char *label = row == 0 ? T_CONTINUE : scenes[row - 1].unlocked ? TITLES[row - 1] : T_LOCKED;
+    const char *label = row == 0 ? (continue_on ? T_CONTINUE "  ON" : T_CONTINUE "  OFF") : scenes[row - 1].unlocked ? TITLES[row - 1] : T_LOCKED;
     bool dim = row > 0 && !scenes[row - 1].unlocked;
     uint32_t text = menu_guest_text(label);
-    int len = (int)strlen(label);
+    int len = (int)strlen(label), cx = x + (0xb0 - 8) / 2;
     if (is_selected) CALL(FN_SET_COLOR, 0xff, 0xff, 0xff);
     else if (dim) CALL(FN_SET_COLOR, 0x70, 0x70, 0x70);
     else CALL(FN_SET_COLOR, 0xe8, 0xd6, 0xab);
-    CALL(FN_DRAW_TEXT, g, x + TEXT_X, y + 1, text, len, 0);
-    if (row == 0) {
-        const char *value = continue_on ? "ON" : "OFF";
-        CALL(FN_DRAW_TEXT, g, x + VALUE_X, y + 1, menu_guest_text(value), (uint32_t)strlen(value), 1);
-    }
+    CALL(FN_DRAW_TEXT, g, cx, y + 1, text, len, 1);
     if (is_selected) {
         int width = (int)CALL(FN_TEXT_WIDTH, text, len, 0);
-        CALL(FN_DRAW_CURSOR, got(GOT_CURSOR), width, x + TEXT_X + width / 2, y);
+        CALL(FN_DRAW_CURSOR, got(GOT_CURSOR), width, cx, y);
     }
 }
 

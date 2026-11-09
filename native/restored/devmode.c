@@ -33,6 +33,7 @@ void orig_f_264c(cpu_t *c);
 #define T_HUD "\xbb\xf3\xc5\xc2\xc3\xa2" // 상태창
 #define T_BOTTOM "\xc7\xcf\xb4\xdc" // 하단
 #define T_TOP "\xbb\xf3\xb4\xdc" // 상단
+#define T_EXTRA "EXTRA"
 #define T_TURN "\xc5\xcf\xc1\xa6\x20\xb8\xf0\xb5\xe5" // 턴제 모드
 
 enum {
@@ -71,6 +72,7 @@ enum {
     ITEM_EXPERT = 1,
     ITEM_MUSIC = 14, // 원본 상태표(0~13) 밖의 번호다. 0x1453bc에 넘기기 전에 상태 8로 바꾼다.
     ITEM_REPLAY = 15,
+    ITEM_EXTRA = 17, // EXTRA: 플레이리스트·턴제 모드·스토리 다시보기를 묶은 하위 메뉴(사용자 결정 2026-11-09)
     ITEM_TURN = 16, // 턴제 모드(엔딩 뒤 해금, turnmode.c). 이어하기/처음부터 창을 열고, 고르면 폴더를 바꿔 스토리모드(상태 0)로 넘긴다
     PANEL_W = 0xb0,
     PANEL_H = 0xa0,
@@ -223,6 +225,77 @@ static int menu_state(void) {
     return (int8_t)R8(got(GOT_MENU_STATE));
 }
 
+// ---- EXTRA 하위 메뉴 ----
+// 줄: 플레이리스트, 턴제 모드(엔딩 뒤에만), 스토리 다시보기. 고르면 그 창을 같은 상태 8 안에서 연다.
+static bool in_extra; // 지금 창이 EXTRA에서 연 하위 창이다
+static int extra_sel;
+static const menu_panel extra_panel;
+
+static int extra_rows(const menu_panel **out, const char **labels) {
+    int n = 0;
+    out[n] = &music_panel; labels[n++] = music_panel.label;
+    if (turn_unlocked()) { out[n] = &turn_panel; labels[n++] = T_TURN; }
+    out[n] = &replay_panel; labels[n++] = replay_panel.label;
+    return n;
+}
+
+static void extra_open(void) {
+    cpu_t *c = &cpu;
+    const menu_panel *p[3]; const char *l[3];
+    int n = extra_rows(p, l);
+    if (extra_sel >= n) extra_sel = 0;
+    CALL(FN_CURSOR_RESET, got(GOT_CURSOR));
+}
+
+// 가운데 정렬(사용자 결정 2026-11-09): 줄 묶음을 창(0xb0 × 0xa0)의 가로·세로 가운데에 둔다.
+static void extra_draw(int x, int y) {
+    cpu_t *c = &cpu;
+    menu_draw_frame(x, y);
+    const menu_panel *p[3]; const char *l[3];
+    int n = extra_rows(p, l);
+    uint32_t g = R32(got(GOT_SCREEN));
+    int cx = x + PANEL_W / 2, top = y + (PANEL_H - n * ROW_H) / 2;
+    for (int i = 0; i < n; i++) {
+        uint32_t text = menu_guest_text(l[i]);
+        int len = (int)strlen(l[i]), ry = top + i * ROW_H;
+        if (i == extra_sel) CALL(FN_SET_COLOR, 0xff, 0xff, 0xff);
+        else CALL(FN_SET_COLOR, 0xe8, 0xd6, 0xab);
+        CALL(FN_DRAW_TEXT, g, cx, ry + 1, text, len, 1);
+        if (i == extra_sel) {
+            int w = (int)CALL(FN_TEXT_WIDTH, text, len, 0);
+            CALL(FN_DRAW_CURSOR, got(GOT_CURSOR), w, cx, ry);
+        }
+    }
+}
+
+static void extra_key(int key) {
+    const menu_panel *p[3]; const char *l[3];
+    int n = extra_rows(p, l);
+    switch (key) {
+    case KEY_CLEAR: menu_leave(); break;
+    case -2: case 56: extra_sel = (extra_sel + 1) % n; break;
+    case -1: case 50: extra_sel = (extra_sel + n - 1) % n; break;
+    case -5: case 53:
+        active = p[extra_sel];
+        in_extra = true;
+        active->open();
+        break;
+    }
+}
+
+static const menu_panel extra_panel = {T_EXTRA, extra_open, extra_draw, extra_key, NULL, NULL};
+
+// 하위 창을 닫고 EXTRA 목록으로(커서는 그 줄에 둔다).
+static void back_to_extra(void) {
+    if (active && active->close) active->close();
+    const menu_panel *p[3]; const char *l[3];
+    int n = extra_rows(p, l);
+    for (int i = 0; i < n; i++) if (p[i] == active) extra_sel = i;
+    active = &extra_panel;
+    in_extra = false;
+    extra_open();
+}
+
 bool replay_take_return(void);
 
 void f_453bc(cpu_t *c) {
@@ -230,12 +303,13 @@ void f_453bc(cpu_t *c) {
     // 스토리 다시보기가 끝나 메뉴로 돌아오면 목록을 다시 연다.
     if ((next == 9 || next == 11) && replay_take_return()) {
         next = ITEM_REPLAY;
-        W8(got(GOT_MENU_ITEM), ITEM_REPLAY);
+        W8(got(GOT_MENU_ITEM), ITEM_EXTRA);
     }
     extern bool turn_starting;
     if (turn_starting) { orig_f_453bc(c); return; } // 턴제 창에서 스토리모드로 넘기는 중
     turn_back_to_main();
-    active = next == ITEM_TURN ? &turn_panel : next == ITEM_MUSIC ? &music_panel : next == ITEM_REPLAY ? &replay_panel : NULL;
+    active = next == ITEM_EXTRA ? &extra_panel : next == ITEM_TURN ? &turn_panel : next == ITEM_MUSIC ? &music_panel : next == ITEM_REPLAY ? &replay_panel : NULL;
+    in_extra = next == ITEM_TURN || next == ITEM_MUSIC || next == ITEM_REPLAY; // 스토리 다시보기에서 돌아온 경우도 취소하면 EXTRA 목록으로
     if (active) c->r[0] = STATE_DEV;
     orig_f_453bc(c);
     if (menu_state() != STATE_DEV) return;
@@ -271,13 +345,14 @@ void f_45a88(cpu_t *c) {
     if (menu_state() != STATE_DEV) { orig_f_45a88(c); return; }
     int key = (int)c->r[0];
     if (!(CALL(FN_ANIM_IDLE, got(GOT_MENU_ITEM)) & 0xff)) return;
+    if (active && in_extra && key == KEY_CLEAR) { back_to_extra(); return; } // EXTRA 하위 창에서 취소: 목록으로
     if (active) active->key(key);
     else panel_key(key);
 }
 
-// 메인메뉴 좌우 이동. 턴제 모드를 스토리모드 다음에(엔딩 뒤에만), 플레이리스트와 스토리 다시보기를 네트워크 다음에, 개발자모드를 환경설정 다음에 끼운다. 열리지 않은 EXPERT는 건너뛴다(원본과 같다).
+// 메인메뉴 좌우 이동. EXTRA(플레이리스트·턴제 모드·스토리 다시보기)를 네트워크 다음에, 개발자모드를 환경설정 다음에 끼운다. 열리지 않은 EXPERT는 건너뛴다(원본과 같다).
 void f_4609c(cpu_t *c) {
-    static const signed char ORDER[] = {0, ITEM_TURN, 1, 2, ITEM_MUSIC, ITEM_REPLAY, 3, 4, ITEM_DEV, 5, 6, 7};
+    static const signed char ORDER[] = {0, 1, 2, ITEM_EXTRA, 3, 4, ITEM_DEV, 5, 6, 7};
     enum { COUNT = sizeof ORDER };
     int key = (int)c->r[0], step = 0;
     if (key == -4 || key == -2 || key == 54 || key == 56) step = 1;
@@ -288,9 +363,9 @@ void f_4609c(cpu_t *c) {
     int current = (int8_t)R8(item), pos = 0;
     for (int i = 0; i < COUNT; i++)
         if (ORDER[i] == current) pos = i;
-    bool expert_open = (CALL(FN_EXPERT_OPEN) & 0xff) != 0, turn_open = turn_unlocked();
+    bool expert_open = (CALL(FN_EXPERT_OPEN) & 0xff) != 0;
     do pos = (pos + step + COUNT) % COUNT;
-    while ((ORDER[pos] == ITEM_EXPERT && !expert_open) || (ORDER[pos] == ITEM_TURN && !turn_open));
+    while (ORDER[pos] == ITEM_EXPERT && !expert_open);
     W8(item, ORDER[pos]);
 }
 
@@ -301,7 +376,7 @@ void f_45b5c(cpu_t *c) {
     int x = (int)R32(screen + 0x48) >> 1, y = half + ((height - half - 0x2d) >> 1) + 0x1c;
     int item = (int8_t)R8(got(GOT_MENU_ITEM));
     uint32_t text, len;
-    const char *added = item == ITEM_TURN ? T_TURN : item == ITEM_DEV ? T_MENU : item == ITEM_MUSIC ? music_panel.label : item == ITEM_REPLAY ? replay_panel.label : NULL;
+    const char *added = item == ITEM_EXTRA ? T_EXTRA : item == ITEM_TURN ? T_TURN : item == ITEM_DEV ? T_MENU : item == ITEM_MUSIC ? music_panel.label : item == ITEM_REPLAY ? replay_panel.label : NULL;
     if (added) {
         text = menu_guest_text(added);
         len = (uint32_t)strlen(added);

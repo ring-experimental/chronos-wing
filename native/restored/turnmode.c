@@ -64,7 +64,7 @@ enum {
     FN_MENU_STATE = 0x1453bc, MENU_STORY = 0,
     FN_DRAW_TEXT = 0x12c1ec, FN_SET_COLOR = 0x12d734, FN_TEXT_WIDTH = 0x12d54c,
     FN_DRAW_CURSOR = 0x11f514, FN_CURSOR_RESET = 0x11f4cc,
-    ROW_H = 14, ROW_TOP = 8, TEXT_X = 16, NOTE_Y = 0x60,
+    ROW_H = 14, PANEL_W = 0xb0, PANEL_H = 0xa0,
     KEY_CLEAR = -16,
 };
 
@@ -88,30 +88,35 @@ static void panel_open(void) {
     CALL(FN_CURSOR_RESET, got(GOT_CURSOR));
 }
 
-static void draw_text(int x, int y, const char *t, int r, int g, int b, bool cursor) {
+// cx는 글의 가로 가운데다(사용자 결정: 하위 메뉴는 가운데 정렬).
+static void draw_text(int cx, int y, const char *t, int r, int g, int b, bool cursor) {
     cpu_t *c = &cpu;
     uint32_t text = menu_guest_text(t);
     int len = (int)strlen(t);
     CALL(FN_SET_COLOR, r, g, b);
-    CALL(FN_DRAW_TEXT, R32(got(GOT_SCREEN)), x, y + 1, text, len, 0);
+    CALL(FN_DRAW_TEXT, R32(got(GOT_SCREEN)), cx, y + 1, text, len, 1);
     if (cursor) {
         int w = (int)CALL(FN_TEXT_WIDTH, text, len, 0);
-        CALL(FN_DRAW_CURSOR, got(GOT_CURSOR), w, x + w / 2, y);
+        CALL(FN_DRAW_CURSOR, got(GOT_CURSOR), w, cx, y);
     }
 }
 
 static void panel_draw(int x, int y) {
     menu_draw_frame(x, y);
     const char *rows[2] = {T_CONTINUE, T_NEW};
+    bool note = confirm || !has_save;
+    int lines = 2 + (note ? (confirm ? 3 : 2) : 0); // 안내 글은 한 줄 띄우고 아래에
+    int cx = x + PANEL_W / 2, top = y + (PANEL_H - lines * ROW_H) / 2;
     for (int i = 0; i < 2; i++) {
         bool dim = i == 0 && !has_save;
         int r = i == sel ? 0xff : dim ? 0x70 : 0xe8, g = i == sel ? 0xff : dim ? 0x70 : 0xd6, b = i == sel ? 0xff : dim ? 0x70 : 0xab;
-        draw_text(x + TEXT_X, y + ROW_TOP + i * ROW_H, rows[i], r, g, b, i == sel);
+        draw_text(cx, top + i * ROW_H, rows[i], r, g, b, i == sel);
     }
+    int ny = top + 3 * ROW_H;
     if (confirm) {
-        draw_text(x + 8, y + NOTE_Y, T_CONFIRM, 0xff, 0xa0, 0x40, false);
-        draw_text(x + 8, y + NOTE_Y + ROW_H, T_CONFIRM2, 0xff, 0xa0, 0x40, false);
-    } else if (!has_save) draw_text(x + 8, y + NOTE_Y, T_NO_SAVE, 0xa0, 0xa0, 0xa0, false);
+        draw_text(cx, ny, T_CONFIRM, 0xff, 0xa0, 0x40, false);
+        draw_text(cx, ny + ROW_H, T_CONFIRM2, 0xff, 0xa0, 0x40, false);
+    } else if (!has_save) draw_text(cx, ny, T_NO_SAVE, 0xa0, 0xa0, 0xa0, false);
 }
 
 // 기존 턴제 폴더를 날짜 붙은 백업으로 옮긴다(지우지 않는다).
