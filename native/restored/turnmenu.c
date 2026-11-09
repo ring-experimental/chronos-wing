@@ -17,6 +17,7 @@ enum {
     LABELS = 0x19aeec, ID_HERO = 0, ID_TEAM = 7,
     FN_PANEL = 0x172aa8,
     MEMBERS = 0x1a9e58, MEMBER_SIZE = 0x74, M_NAME = 4, M_EXP = 0x28, M_NEED = 0x2c, MEMBER_COUNT = 8,
+    FN_HERO_TAB = 0x122568, // 원작 주인공 화면 탭 바꾸기(탭, 하위): 0 스테이터스 1 무장상태 2 상성률 3 특성장착 4 특성관리
     FN_HERO = 0x147434, H_LEVEL = 0x101, H_CLASS = 0xb1, H_HP = 0xec, H_HPMAX = 0xf0, H_MP = 0x114, H_MPMAX = 0x118,
     H_EXP = 0xf4, FN_HERO_NEED = 0x12ebfc, FN_PATK = 0x1022c8, FN_MATK = 0x102348, FN_DEF = 0x101ef4, FN_DEF_ADD = 0x101fc0, FN_CRIT = 0x102280,
     KEY_UP = -1, KEY_DOWN = -2, KEY_LEFT = -3, KEY_RIGHT = -4, KEY_OK = -5, KEY_CLEAR = -16,
@@ -35,6 +36,8 @@ static struct {
     uint16_t *shot;
     size_t shot_size;
 } M;
+
+static bool bypass; // 원작 주인공 화면을 직접 열 때
 
 bool turn_menu_open(void) { return M.mode != M_NONE; }
 
@@ -107,7 +110,7 @@ static void open_mode(mode m) {
 // 페이지 열기. 턴제 모드에서 0(스테이터스)과 7(팀원 편성)은 자체 창으로 연다.
 void f_20d8c(cpu_t *c) {
     int page = (int8_t)c->r[0];
-    if (turn_mode_on() && (page == ID_HERO || page == ID_TEAM)) {
+    if (turn_mode_on() && !bypass && (page == ID_HERO || page == ID_TEAM)) {
         open_mode(page == ID_HERO ? M_LIST : M_TEAM);
         return;
     }
@@ -125,7 +128,8 @@ static bool in_party(int i) {
 
 static const char *SLOT_NAME[6] = {"\xb9\xab\xb1\xe2", "\xc5\xf5\xb1\xb8", "\xb0\xa9\xbf\xca", "\xc0\xe5\xb0\xa9", "\xbd\xc5\xb9\xdf", "\xbe\xc7\xbc\xbc\xbc\xad\xb8\xae"}; // 무기 / 투구 / 갑옷 / 장갑 / 신발 / 악세서리
 static const char *CLASS_NAME[3] = {"\xb0\xdd\xc5\xf5", "\xb0\xcb", "\xc1\xa4\xb7\xc9"}; // 격투 / 검 / 정령
-static const char *TAB_NAME[3] = {"\xb4\xc9\xb7\xc2\xc4\xa1", "\xc0\xe5\xba\xf1", "\xbd\xba\xc5\xb3"}; // 능력치 / 장비 / 스킬
+static const char *TAB_NAME[4] = {"\xb4\xc9\xb7\xc2\xc4\xa1", "\xc0\xe5\xba\xf1", "\xbd\xba\xc5\xb3", "\xc6\xaf\xbc\xba"}; // 능력치 / 장비 / 스킬 / 특성(주인공만)
+static int tab_count(void) { return M.member < 0 ? 4 : 3; }
 
 static void row(int x, int y, int w, bool sel, const char *s, uint32_t col) {
     if (sel) turn_fill(x - 2, y - 2, w + 4, 15, 0x30, 0x5f, 0xae);
@@ -183,11 +187,16 @@ static void draw(void) {
         if (i >= 0) snprintf(s, sizeof s, "%s  Lv%d", member_name(i), st.level);
         else snprintf(s, sizeof s, "\xc4\xab\xc0\xcc  Lv%d", st.level); // 카이
         turn_draw_text(lx, y + 8, lw, s, 0xe8d6ab, 0);
-        for (int t = 0; t < 3; t++) {
-            int tx = x + pw - 150 + t * 48;
-            if (t == M.tab) turn_fill(tx - 2, y + 6, 46, 15, 0x30, 0x5f, 0xae);
-            turn_draw_text(tx + 21, y + 8, 46, TAB_NAME[t], t == M.tab ? 0xffe060 : 0xc0c0c0, 1);
+        int nt = tab_count(), tw = nt == 4 ? 40 : 48;
+        for (int t = 0; t < nt; t++) {
+            int tx = x + pw - nt * tw - 6 + t * tw;
+            if (t == M.tab) turn_fill(tx - 2, y + 6, tw - 2, 15, 0x30, 0x5f, 0xae);
+            turn_draw_text(tx + tw / 2 - 3, y + 8, tw - 2, TAB_NAME[t], t == M.tab ? 0xffe060 : 0xc0c0c0, 1);
         }
+        if (M.tab == 3) { // 주인공 특성: 원작 주인공 화면의 특성장착·특성관리 탭으로 보낸다(리키에게서 산 특성 장착)
+            turn_draw_text(W / 2, ly + 30, pw, "\xc6\xaf\xbc\xba\x20\xc0\xe5\xc2\xf8\xb0\xfa\x20\xb0\xfc\xb8\xae\xb4\xc2\x20\xbf\xf8\xc0\xdb\x20\xc8\xad\xb8\xe9\xbf\xa1\xbc\xad\x20\xc7\xd5\xb4\xcf\xb4\xd9", 0xffffff, 1);
+            turn_draw_text(W / 2, ly + 50, pw, "\xc8\xae\xc0\xce\x3a\x20\xc6\xaf\xbc\xba\xc0\xe5\xc2\xf8\x20\xc8\xad\xb8\xe9\x20\xbf\xad\xb1\xe2", 0xffe060, 1);
+        } else
         if (M.tab == 0 && i < 0) { // 주인공: 원작 스테이터스와 같은 값(0x122fb0)
             char b[9][48];
             snprintf(b[0], 48, "EXP  %d / %d", (int)R32(h + H_EXP), (int)CALL(FN_HERO_NEED, h));
@@ -279,8 +288,16 @@ bool turn_menu_key(int type, int code) {
         }
         break;
     case M_MEMBER:
-        if (left) M.tab = (M.tab + 2) % 3;
-        else if (right) M.tab = (M.tab + 1) % 3;
+        if (left) M.tab = (M.tab + tab_count() - 1) % tab_count();
+        else if (right) M.tab = (M.tab + 1) % tab_count();
+        else if (M.tab == 3 && ok) { // 원작 주인공 화면(페이지 0)을 열고 특성장착 탭(3, 0x122568)으로
+            cpu_t *c = &cpu;
+            M.mode = M_NONE;
+            bypass = true;
+            CALL(0x120d8c, ID_HERO);
+            bypass = false;
+            CALL(FN_HERO_TAB, 3, 0);
+        }
         else if (back) { int keep = M.member; open_mode(M_LIST); for (int k = 0; k < M.nlist; k++) if (M.list[k] == keep) M.cursor = k; }
         else if (M.tab == 1 && up) M.slot = (M.slot + 5) % 6;
         else if (M.tab == 1 && down) M.slot = (M.slot + 1) % 6;

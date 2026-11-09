@@ -162,6 +162,17 @@ bool turn_test_ctrl(const char *cmd) {
         }
         return true;
     }
+    if (!strncmp(cmd, "ptoggle ", 8)) { // turn ptoggle 동료: 면담의 파티추가/파티제외와 같다
+        const char *r;
+        bool ok = turn_party_toggle(atoi(cmd + 8), &r);
+        int p[3], n = turn_party_members(p);
+        fprintf(stderr, "[turn] 파티 바꾸기 %s, 전투 파티 %d명:", ok ? "됨" : "안 됨", n);
+        for (int k = 0; k < n; k++) fprintf(stderr, " %d", p[k]);
+        fprintf(stderr, " / 합류:");
+        for (int i = 0; i < 8; i++) if (turn_member_joined(i)) fprintf(stderr, " %d", i);
+        fprintf(stderr, "\n");
+        return true;
+    }
     if (!strncmp(cmd, "peek ", 5)) { // turn peek 주소 길이(16진). gNN이면 GOT+NN이 가리키는 값부터
         const char *a = cmd + 5;
         uint32_t addr = a[0] == 'g' ? got((uint32_t)strtoul(a + 1, NULL, 16)) : (uint32_t)strtoul(a, NULL, 16);

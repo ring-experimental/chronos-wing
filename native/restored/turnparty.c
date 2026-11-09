@@ -34,6 +34,9 @@ static int party[PARTY_MAX], party_n = -1; // -1: 아직 안 읽음
 static bool fresh;   // 게임 데이터 초기화(0x127318) 뒤 세이브 읽기가 없었다 = 새 게임. 턴제 모드는 새 게임 기준(사용자 결정)이라 이전 TURNPARTY를 버린다
 static bool in_game; // 세이브를 읽었거나(0x1276b4) 게임 안에서 전투·경험치·메뉴가 있었다. 타이틀에서는 주인공 값이 기본값이라 아무것도 하지 않는다
 static unsigned seen;                      // 합류를 확인한 동료(레벨 맞춤을 한 번만 한다)
+static unsigned recruited;                 // 스토리 합류 전에 면담으로 파티에 넣은 동료(리키·후거스처럼 처음부터 배에 있는 동료). 합류한 것으로 본다
+
+static void party_load(void);
 
 static uint32_t member(int i) { return MEMBERS + (uint32_t)i * MEMBER_SIZE; }
 
@@ -41,19 +44,20 @@ bool turn_member_joined(int i) {
     cpu_t *c = &cpu;
     if (i < 0 || i >= MEMBER_COUNT) return false;
     if (getenv("CHRONOS_TURN_ALL")) return true; // 시험용: 모든 동료 합류로 본다
-    return R8(STORY_VARS + EXPERT_VAR) == STORY_DONE || R8(STORY_VARS + JOIN_VAR[i]) == STORY_DONE;
+    if (party_n < 0) party_load(); // recruited를 읽는다
+    return R8(STORY_VARS + EXPERT_VAR) == STORY_DONE || R8(STORY_VARS + JOIN_VAR[i]) == STORY_DONE || (recruited >> i & 1);
 }
 
 static void file_path(char *out, size_t cap) { snprintf(out, cap, "%s/TURNPARTY", save_dir); }
 
-// 형식: "TP1" 개수 동료번호×3 합류확인(2바이트)
+// 형식: "TP2" 개수 동료번호×3 합류확인(2바이트) 면담 합류(2바이트). 읽을 때는 이전 "TP1"(면담 합류 없음)도 받는다.
 void turn_party_save(void) {
     if (party_n < 0) return;
     char p[1100];
     file_path(p, sizeof p);
     FILE *f = fopen(p, "wb");
     if (!f) return;
-    uint8_t b[9] = {'T', 'P', '1', (uint8_t)party_n, 0xff, 0xff, 0xff, (uint8_t)seen, (uint8_t)(seen >> 8)};
+    uint8_t b[11] = {'T', 'P', '2', (uint8_t)party_n, 0xff, 0xff, 0xff, (uint8_t)seen, (uint8_t)(seen >> 8), (uint8_t)recruited, (uint8_t)(recruited >> 8)};
     for (int i = 0; i < party_n; i++) b[4 + i] = (uint8_t)party[i];
     fwrite(b, 1, sizeof b, f);
     fclose(f);
@@ -81,11 +85,15 @@ static void party_load(void) {
     file_path(p, sizeof p);
     party_n = 0;
     seen = 0;
+    recruited = 0;
     FILE *f = fresh ? NULL : fopen(p, "rb");
-    uint8_t b[9];
-    if (f && fread(b, 1, sizeof b, f) == sizeof b && !memcmp(b, "TP1", 3) && b[3] <= PARTY_MAX) {
+    uint8_t b[11];
+    size_t got_n = f ? fread(b, 1, sizeof b, f) : 0;
+    bool v2 = got_n == 11 && !memcmp(b, "TP2", 3), v1 = got_n == 9 && !memcmp(b, "TP1", 3);
+    if ((v1 || v2) && b[3] <= PARTY_MAX) {
         for (int i = 0; i < b[3]; i++) if (b[4 + i] < MEMBER_COUNT) party[party_n++] = b[4 + i];
         seen = b[7] | b[8] << 8;
+        if (v2) recruited = b[9] | b[10] << 8;
     } else {
         // 처음: 원작에서 소울링크한 동료를 앞에 두고 합류한 순서대로 채운다. 이미 합류한 동료는 지금 합류한 것으로 보고 레벨을 맞춘다.
         cpu_t *c = &cpu;
@@ -167,6 +175,12 @@ bool turn_party_toggle(int i, const char **result) {
         *result = "\xc6\xc4\xc6\xbc\xbf\xa1\xbc\xad \xbb\xb0\xbd\xc0\xb4\xcf\xb4\xd9"; // 파티에서 뺐습니다
     } else {
         if (party_n >= PARTY_MAX) { *result = "\xc6\xc4\xc6\xbc\xb0\xa1 \xb0\xa1\xb5\xe6 \xc3\xa1\xbd\xc0\xb4\xcf\xb4\xd9;(\xc3\xd6\xb4\xeb 3\xb8\xed)"; return false; } // 파티가 가득 찼습니다;(최대 3명)
+        if (!turn_member_joined(i)) { // 스토리 합류 전 면담(리키·후거스): 이제부터 합류한 동료로 본다(팀원 편성, 전투, 경험치)
+            recruited |= 1u << i;
+            seen |= 1u << i;
+            turn_equip_give_basic(i);
+            fprintf(stderr, "[turn] 파티: 동료 %d 면담으로 합류\n", i);
+        }
         catch_up(i); // 합류 때 맞추지 못한 동료(이 기능 전 세이브)도 넣을 때 맞춘다
         party[party_n++] = i;
         *result = "\xc6\xc4\xc6\xbc\xbf\xa1 \xb3\xd6\xbe\xfa\xbd\xc0\xb4\xcf\xb4\xd9"; // 파티에 넣었습니다
@@ -180,7 +194,7 @@ bool turn_party_toggle(int i, const char **result) {
 void f_2eb44(cpu_t *c) {
     uint32_t hero = c->r[0];
     int amount = (int)c->r[1];
-    if (!turn_mode_on() || (CALL(FN_NETWORK) & 0xff)) { orig_f_2eb44(c); return; }
+    if (!turn_mode_on() || (CALL(FN_NETWORK) & 0xff)) { c->r[0] = hero; c->r[1] = (uint32_t)amount; orig_f_2eb44(c); return; } // CALL이 r0~r3을 바꾼다
     in_game = true;
     ensure();
     uint32_t link = R32(hero + H_LINK);
@@ -211,11 +225,16 @@ static int talk_member(void) {
 static void set_label(const char *euc8) { cpu_t *c = &cpu; memcpy(c->m + LABEL_LINK, euc8, 8); }
 
 // 면담 창 그리기. 소울링크 버튼 글을 이 동료의 파티 상태에 맞춘다.
+// 면담 창 그리기(x, y). 앞에서 게임 함수를 부르면(CALL) r0~r3이 바뀌므로 인자를 잡아 두었다가 원본에 다시 넘긴다.
+// (이것을 빠뜨려 면담 창이 왼쪽 위로 밀려 그려졌다, 2026-11-09 폰에서 발견)
 void f_5bf84(cpu_t *c) {
+    uint32_t x = c->r[0], y = c->r[1];
     if (turn_mode_on() && !(CALL(FN_NETWORK) & 0xff)) {
         int i = talk_member();
         if (i >= 0) { ensure(); set_label(in_party(i) ? "\xc6\xc4\xc6\xbc\xc1\xa6\xbf\xdc" : "\xc6\xc4\xc6\xbc\xc3\xdf\xb0\xa1"); } // 파티제외 / 파티추가
     } else set_label("\xbc\xd2\xbf\xef\xb8\xb5\xc5\xa9"); // 소울링크
+    c->r[0] = x;
+    c->r[1] = y;
     orig_f_5bf84(c);
 }
 
