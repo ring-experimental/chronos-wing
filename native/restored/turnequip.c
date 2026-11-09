@@ -21,6 +21,7 @@ enum {
     FN_ITEM_KIND = 0x138410, FN_ITEM_NAME_PTR = 0x13a28c,
     FN_W_BASE = 0x13a4a8, FN_W_PHYS = 0x13a4dc, FN_W_MAGIC = 0x13a4f0, FN_REFINE = 0x13a5c4,
     FN_DEF_PHYS = 0x13a518, FN_DEF_MAGIC = 0x13a530,
+    FN_HERO_SLOT = 0x128f54, FN_HERO_EQUIP = 0x1205b8, FN_HERO_BIND = 0x129204, HERO = -1,
     MEMBERS = 0x1a9e58, MEMBER_SIZE = 0x74, M_LEVEL = 0x35,
     SLOT_BASE = 16, SLOTS = 6, MEMBER_COUNT = 8, GEAR_FILE_SIZE = 9000, SAVE_LAST_STEP = 8,
 };
@@ -63,6 +64,7 @@ static uint32_t find_in(uint32_t list, uint32_t it, uint32_t *node_out) {
 
 uint32_t turn_equip_item(int member, int s) {
     cpu_t *c = &cpu;
+    if (member == HERO) return CALL(FN_HERO_SLOT, s); // 주인공 칸 배열(원작)
     int slot = turn_equip_slot(member, s);
     for (uint32_t n = R32(gear_list() + LIST_FIRST); n; n = R32(n + NODE_NEXT)) {
         uint32_t it = R32(n + NODE_ITEM);
@@ -84,7 +86,7 @@ const char *turn_item_name(uint32_t it) {
 bool turn_equip_fits(int member, int s, uint32_t it) {
     int k = turn_item_kind(it);
     switch (s) {
-    case 0: return k == WEAPON_KIND[member];
+    case 0: return member == HERO ? k >= 8 && k <= 10 : k == WEAPON_KIND[member]; // 주인공은 무기 세 종류 모두(무기가 직업을 정한다)
     case 1: return k == 11;
     case 2: return k == 12;
     case 3: return k == 13;
@@ -132,6 +134,12 @@ const char *turn_equip_set(int member, int s, uint32_t it) {
     cpu_t *c = &cpu;
     uint32_t old = turn_equip_item(member, s);
     if (old == it) return NULL;
+    if (member == HERO) { // 원작 장착(0x1205b8): 아이템은 가방·창고 제자리에 두고 칸만 바꾼다. 무기·투구·갑옷이면 겉모습과 직업(+0xb1 = 무기 종류 - 8)도 바뀐다
+        if (s == 0 && !it) return "\xc1\xd6\xc0\xce\xb0\xf8\xc0\xc7 \xb9\xab\xb1\xe2\xb4\xc2 \xbb\xa9 \xbc\xf6 \xbe\xf8\xb4\xd9"; // 주인공의 무기는 뺄 수 없다
+        CALL(FN_HERO_EQUIP, s, it);
+        fprintf(stderr, "[turn] 장비: 주인공 칸 %d %08x → %08x, 클래스 %d\n", s, old, it, R8(CALL(0x147434) + 0xb1));
+        return NULL;
+    }
     if (old && !it && !room_for_one()) return "\xc3\xa2\xb0\xed\xbf\xcd \xb0\xa1\xb9\xe6\xc0\xcc \xb0\xa1\xb5\xe6 \xc3\xa1\xb4\xd9"; // 창고와 가방이 가득 찼다
     if (it) { // 가방이나 창고에서 꺼낸다(그 자리가 비므로 바꿔 입을 때 돌려놓을 곳이 생긴다)
         uint32_t node, l = find_in(storage_list(), it, &node);
@@ -200,8 +208,22 @@ void turn_equip_reset(void) {
     memset(c->m + gear_list(), 0, 16); // 새 게임·읽기 전: 이전 목록은 버린다(아이템 풀은 게임 초기화가 비운다)
 }
 
+// 세이브 읽기 끝(0x1276b4 뒤). 원작은 주인공 칸 0~5를 창고에서만 다시 묶는다. 턴제에서는 가방에서 낀 장비도 있으므로 가방도 훑어 묶는다.
+static void hero_rebind_bag(void) {
+    cpu_t *c = &cpu;
+    for (uint32_t n = R32(bag_list() + LIST_FIRST); n; n = R32(n + NODE_NEXT)) {
+        uint32_t it = R32(n + NODE_ITEM);
+        int s = it ? (int8_t)R8(it + ITEM_SLOT) : -1;
+        if (s >= 0 && s < SLOTS && CALL(FN_HERO_SLOT, s) != it) {
+            CALL(FN_HERO_BIND, s, it); // 칸만 묶는다. 0x1205b8의 겉모습 갱신(0x120a68)은 읽는 중에 부르면 그림이 아직 없어 멈춘다. 직업(+0xb1)은 HERODATA에 저장돼 있다
+            fprintf(stderr, "[turn] 장비: 가방의 주인공 칸 %d 다시 묶음\n", s);
+        }
+    }
+}
+
 void turn_equip_load(void) {
     cpu_t *c = &cpu;
+    hero_rebind_bag();
     turn_equip_reset();
     char p[1100];
     gear_path(p, sizeof p);

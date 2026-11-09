@@ -2,7 +2,7 @@
 // - 항목 목록 0x120cfc(id 배열)을 감싸 싱글 목록 [0 주인공, 1, 2, 3/4, 5]을 [0, 7, 1, 2, 3/4, 5]로 바꾼다. 7은 네트워크 전용(코스튬자랑) 번호를 빌린다.
 //   라벨 표 0x19aeec(메모리에는 실제 주소로 옮겨져 있다)의 0번과 7번을 새 글로 가리킨다.
 // - 페이지 열기 0x120d8c(번호)를 감싸 0이면 멤버 목록, 7이면 팀원 편성 창을 연다. 창은 게임을 멈추고(turn_battle_open) 메뉴 화면 위에 그린다.
-//   멤버 목록에서 주인공을 고르면 원본 주인공 화면(페이지 0)으로, 동료를 고르면 동료 화면(능력치·장비·스킬)으로 간다.
+//   멤버 목록에서 고른 사람(주인공 포함)의 화면(능력치·장비·스킬)으로 간다. 원작 무장상태는 싱글에서 교체가 막혀 있어 주인공 장비도 여기서 바꾼다.
 // 근거는 work/turn-plan.md "메뉴 개편".
 #include "restored.h"
 #include "turn.h"
@@ -17,7 +17,8 @@ enum {
     LABELS = 0x19aeec, ID_HERO = 0, ID_TEAM = 7,
     FN_PANEL = 0x172aa8,
     MEMBERS = 0x1a9e58, MEMBER_SIZE = 0x74, M_NAME = 4, M_EXP = 0x28, M_NEED = 0x2c, MEMBER_COUNT = 8,
-    FN_HERO = 0x147434, H_LEVEL = 0x101,
+    FN_HERO = 0x147434, H_LEVEL = 0x101, H_CLASS = 0xb1, H_HP = 0xec, H_HPMAX = 0xf0, H_MP = 0x114, H_MPMAX = 0x118,
+    H_EXP = 0xf4, FN_HERO_NEED = 0x12ebfc, FN_PATK = 0x1022c8, FN_MATK = 0x102348, FN_DEF = 0x101ef4, FN_DEF_ADD = 0x101fc0, FN_CRIT = 0x102280,
     KEY_UP = -1, KEY_DOWN = -2, KEY_LEFT = -3, KEY_RIGHT = -4, KEY_OK = -5, KEY_CLEAR = -16,
     ROWS = 8, MAX_CAND = 40,
 };
@@ -34,7 +35,6 @@ static struct {
     uint16_t *shot;
     size_t shot_size;
 } M;
-static bool bypass;
 
 bool turn_menu_open(void) { return M.mode != M_NONE; }
 
@@ -107,7 +107,7 @@ static void open_mode(mode m) {
 // 페이지 열기. 턴제 모드에서 0(스테이터스)과 7(팀원 편성)은 자체 창으로 연다.
 void f_20d8c(cpu_t *c) {
     int page = (int8_t)c->r[0];
-    if (turn_mode_on() && !bypass && (page == ID_HERO || page == ID_TEAM)) {
+    if (turn_mode_on() && (page == ID_HERO || page == ID_TEAM)) {
         open_mode(page == ID_HERO ? M_LIST : M_TEAM);
         return;
     }
@@ -124,6 +124,7 @@ static bool in_party(int i) {
 }
 
 static const char *SLOT_NAME[6] = {"\xb9\xab\xb1\xe2", "\xc5\xf5\xb1\xb8", "\xb0\xa9\xbf\xca", "\xc0\xe5\xb0\xa9", "\xbd\xc5\xb9\xdf", "\xbe\xc7\xbc\xbc\xbc\xad\xb8\xae"}; // 무기 / 투구 / 갑옷 / 장갑 / 신발 / 악세서리
+static const char *CLASS_NAME[3] = {"\xb0\xdd\xc5\xf5", "\xb0\xcb", "\xc1\xa4\xb7\xc9"}; // 격투 / 검 / 정령
 static const char *TAB_NAME[3] = {"\xb4\xc9\xb7\xc2\xc4\xa1", "\xc0\xe5\xba\xf1", "\xbd\xba\xc5\xb3"}; // 능력치 / 장비 / 스킬
 
 static void row(int x, int y, int w, bool sel, const char *s, uint32_t col) {
@@ -176,15 +177,33 @@ static void draw(void) {
     case M_MEMBER: case M_PICK: {
         int i = M.member;
         member_stats st;
-        turn_member_stats(i, &st);
-        snprintf(s, sizeof s, "%s  Lv%d", member_name(i), st.level);
+        uint32_t h = CALL(FN_HERO);
+        if (i >= 0) turn_member_stats(i, &st);
+        else { memset(&st, 0, sizeof st); st.level = (int8_t)R8(h + H_LEVEL); }
+        if (i >= 0) snprintf(s, sizeof s, "%s  Lv%d", member_name(i), st.level);
+        else snprintf(s, sizeof s, "\xc4\xab\xc0\xcc  Lv%d", st.level); // 카이
         turn_draw_text(lx, y + 8, lw, s, 0xe8d6ab, 0);
         for (int t = 0; t < 3; t++) {
             int tx = x + pw - 150 + t * 48;
             if (t == M.tab) turn_fill(tx - 2, y + 6, 46, 15, 0x30, 0x5f, 0xae);
             turn_draw_text(tx + 21, y + 8, 46, TAB_NAME[t], t == M.tab ? 0xffe060 : 0xc0c0c0, 1);
         }
-        if (M.tab == 0) {
+        if (M.tab == 0 && i < 0) { // 주인공: 원작 스테이터스와 같은 값(0x122fb0)
+            char b[9][48];
+            snprintf(b[0], 48, "EXP  %d / %d", (int)R32(h + H_EXP), (int)CALL(FN_HERO_NEED, h));
+            snprintf(b[1], 48, "HP   %d / %d", (int)R32(h + H_HP), (int)R32(h + H_HPMAX));
+            snprintf(b[2], 48, "MP   %d / %d", (int)R32(h + H_MP), (int)R32(h + H_MPMAX));
+            snprintf(b[3], 48, "\xb9\xb0\xb8\xae\xb0\xf8\xb0\xdd  %d", (int)CALL(FN_PATK)); // 물리공격
+            snprintf(b[4], 48, "\xb8\xb6\xb5\xb5\xb0\xf8\xb0\xdd  %d", (int)CALL(FN_MATK)); // 마도공격
+            for (int d = 0; d < 2; d++) {
+                int v = (int)CALL(FN_DEF, d);
+                v += (int)CALL(FN_DEF_ADD, v, d);
+                snprintf(b[5 + d], 48, "%s  %d", d ? "\xb8\xb6\xb5\xb5\xb9\xe6\xbe\xee" : "\xb9\xb0\xb8\xae\xb9\xe6\xbe\xee", v); // 마도방어 / 물리방어
+            }
+            snprintf(b[7], 48, "\xc4\xa1\xb8\xed\xc5\xb8  %d%%", (int)CALL(FN_CRIT)); // 치명타
+            snprintf(b[8], 48, "\xc1\xf7\xbe\xf7  %s", CLASS_NAME[R8(h + H_CLASS) % 3]); // 직업  (무기 종류가 정한다)
+            for (int k = 0; k < 9; k++) turn_draw_text(lx, ly + k * 17, lw, b[k], 0xffffff, 0);
+        } else if (M.tab == 0) {
             uint32_t e = MEMBERS + (uint32_t)i * MEMBER_SIZE;
             const char *lines[8];
             char b[8][48];
@@ -214,9 +233,11 @@ static void draw(void) {
             }
             if (!M.ncand) turn_draw_text(lx, ly, lw, "\xb0\xa1\xb9\xe6\xb0\xfa \xc3\xa2\xb0\xed\xbf\xa1 \xb8\xc2\xb4\xc2 \xc0\xe5\xba\xf1\xb0\xa1 \xbe\xf8\xb4\xd9", 0xa0a0a0, 0); // 가방과 창고에 맞는 장비가 없다
         } else {
-            tskill basic, sk[8];
-            int n = turn_member_skills(i, st.level, &basic, sk, 8);
-            for (int k = 0; k < n; k++, ly += 18) {
+            tskill basic, sk[14];
+            int n = i >= 0 ? turn_member_skills(i, st.level, &basic, sk, 14) : turn_hero_skills(R8(h + H_CLASS), &basic, sk, 14);
+            if (i < 0 && !n) turn_draw_text(lx, ly, lw, "\xb9\xe8\xbf\xee \xbd\xba\xc5\xb3\xc0\xcc \xbe\xf8\xb4\xd9", 0xa0a0a0, 0); // 배운 스킬이 없다
+            int step = n > 9 ? 13 : 18; // 주인공은 스킬이 많다(격투 13개까지)
+            for (int k = 0; k < n; k++, ly += step) {
                 bool open = sk[k].unlock <= st.level;
                 snprintf(s, sizeof s, "%s", sk[k].name);
                 turn_draw_text(lx, ly, lw - 70, s, open ? 0xffffff : 0x707070, 0);
@@ -254,13 +275,7 @@ bool turn_menu_key(int type, int code) {
         else if (back) M.mode = M_NONE;
         else if (ok) {
             int i = M.list[M.cursor];
-            if (i < 0) { // 주인공: 원본 주인공 화면
-                M.mode = M_NONE;
-                cpu_t *c = &cpu;
-                bypass = true;
-                CALL(0x120d8c, ID_HERO);
-                bypass = false;
-            } else { M.member = i; M.tab = 0; M.slot = 0; M.mode = M_MEMBER; }
+            M.member = i; M.tab = 0; M.slot = 0; M.mode = M_MEMBER; // 주인공(-1)도 같은 화면(능력치·장비·스킬)
         }
         break;
     case M_MEMBER:
