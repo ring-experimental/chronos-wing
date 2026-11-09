@@ -13,8 +13,22 @@ enum { FN_SHOW_MESSAGE = 0x157d84, FN_HASH = 0x13fc74, FN_DECRYPT = 0x105908, NE
 static const char MAGIC[8] = "CWSAVE1\n";
 #define NAME_LEN 16
 #define MAX_FILE (1024 * 1024)
-static const char *const FILES[] = {"BAGSAVE", "GAMEDATA", "HERODATA", "MAINGAMEDATA", "OPTDATA", "POUCHSAVE", "STORAGESAVE0", "STORAGESAVE1", "STORAGESAVE2", "STORAGESAVE3"};
-#define NFILES ((int)(sizeof FILES / sizeof FILES[0]))
+// 묶음에 함께 넣는 턴제 모드 세이브(save_dir/turn, restored/turnmode.c). 묶음 이름은 "T/" + 파일 이름이다.
+// TURN으로 시작하는 파일은 게임 해시가 없는 턴제 전용 파일이라 크기만 본다.
+typedef struct { const char *bundle, *dir, *file; bool raw; } slot_t;
+static const slot_t SLOTS[] = {
+    {"BAGSAVE", "", "BAGSAVE", false}, {"GAMEDATA", "", "GAMEDATA", false}, {"HERODATA", "", "HERODATA", false},
+    {"MAINGAMEDATA", "", "MAINGAMEDATA", false}, {"OPTDATA", "", "OPTDATA", false}, {"POUCHSAVE", "", "POUCHSAVE", false},
+    {"STORAGESAVE0", "", "STORAGESAVE0", false}, {"STORAGESAVE1", "", "STORAGESAVE1", false},
+    {"STORAGESAVE2", "", "STORAGESAVE2", false}, {"STORAGESAVE3", "", "STORAGESAVE3", false},
+    {"T/BAGSAVE", "/turn", "BAGSAVE", false}, {"T/GAMEDATA", "/turn", "GAMEDATA", false}, {"T/HERODATA", "/turn", "HERODATA", false},
+    {"T/MAINGAMEDATA", "/turn", "MAINGAMEDATA", false}, {"T/OPTDATA", "/turn", "OPTDATA", false}, {"T/POUCHSAVE", "/turn", "POUCHSAVE", false},
+    {"T/STORAGESAVE0", "/turn", "STORAGESAVE0", false}, {"T/STORAGESAVE1", "/turn", "STORAGESAVE1", false},
+    {"T/STORAGESAVE2", "/turn", "STORAGESAVE2", false}, {"T/STORAGESAVE3", "/turn", "STORAGESAVE3", false},
+    {"T/TURNBAG", "/turn", "TURNBAG", true}, {"T/TURNGEAR", "/turn", "TURNGEAR", true}, {"T/TURNPARTY", "/turn", "TURNPARTY", true},
+};
+#define NSLOTS ((int)(sizeof SLOTS / sizeof SLOTS[0]))
+static bool is_turn(const slot_t *s) { return s->dir[0] != 0; }
 static const char *const REQUIRED[] = {"GAMEDATA", "HERODATA", "MAINGAMEDATA"};
 
 // 게임 글꼴이 읽는 EUC-KR이다.
@@ -46,9 +60,9 @@ static void message(int id) {
     guest_call(FN_SHOW_MESSAGE, a, 1);
 }
 
-typedef struct { const char *name; const uint8_t *data; uint32_t size; } entry_t;
+typedef struct { const char *name; const slot_t *slot; const uint8_t *data; uint32_t size; } entry_t;
 static uint8_t *loaded;
-static entry_t entries[NFILES];
+static entry_t entries[NSLOTS];
 static int nentries;
 static bool quit_after_message;
 
@@ -84,16 +98,17 @@ static void export_to(const char *path) {
     memcpy(out, MAGIC, 8);
     len = 12;
     bool has_hero = false;
-    for (int i = 0; i < NFILES; i++) {
+    for (int i = 0; i < NSLOTS; i++) {
+        const slot_t *sl = &SLOTS[i];
         char p[1200];
-        path_of(p, sizeof p, "", FILES[i]);
+        path_of(p, sizeof p, sl->dir, sl->file);
         size_t n;
         void *d = SDL_LoadFile(p, &n);
         if (!d) continue;
-        if (!strcmp(FILES[i], "HERODATA")) has_hero = true;
+        if (!strcmp(sl->bundle, "HERODATA")) has_hero = true;
         out = realloc(out, len + NAME_LEN + 4 + n + 8);
         memset(out + len, 0, NAME_LEN);
-        memcpy(out + len, FILES[i], strlen(FILES[i]));
+        memcpy(out + len, sl->bundle, strlen(sl->bundle));
         len += NAME_LEN;
         uint32_t size = (uint32_t)n;
         memcpy(out + len, &size, 4);
@@ -164,7 +179,7 @@ int savefile_read_plain(const char *name, uint8_t *out, int cap) {
 }
 
 static int known_file(const char *name) {
-    for (int i = 0; i < NFILES; i++) if (!strcmp(FILES[i], name)) return i;
+    for (int i = 0; i < NSLOTS; i++) if (!strcmp(SLOTS[i].bundle, name)) return i;
     return -1;
 }
 
@@ -176,7 +191,7 @@ static bool parse_bundle(const uint8_t *d, size_t n) {
     if (fnv(d, n - 8) != want) return false;
     uint32_t count;
     memcpy(&count, d + 8, 4);
-    if (count == 0 || count > NFILES) return false;
+    if (count == 0 || count > NSLOTS) return false;
     size_t p = 12, end = n - 8;
     for (uint32_t i = 0; i < count; i++) {
         if (end - p < NAME_LEN + 4) return false;
@@ -188,8 +203,9 @@ static bool parse_bundle(const uint8_t *d, size_t n) {
         uint32_t size;
         memcpy(&size, d + p + NAME_LEN, 4);
         p += NAME_LEN + 4;
-        if (size > MAX_FILE || size > end - p || !game_accepts(d + p, size)) return false;
-        entries[nentries++] = (entry_t){FILES[known], d + p, size};
+        const slot_t *sl = &SLOTS[known];
+        if (size > MAX_FILE || size > end - p || (!sl->raw && !game_accepts(d + p, size))) return false;
+        entries[nentries++] = (entry_t){sl->bundle, sl, d + p, size};
         p += size;
     }
     if (p != end) return false;
@@ -215,35 +231,58 @@ static void import_from(const char *path) {
 }
 
 // 새 파일을 모두 쓴 뒤에야 기존 세이브를 옮긴다. 중간에 실패하면 되돌린다.
+// 본편 파일은 언제나 바꾼다. 턴제 폴더(turn)는 묶음에 턴제 파일이 있을 때만 바꾼다(없던 묶음이 턴제 세이브를 지우지 않게).
+static void import_name(char *out, size_t cap, const slot_t *sl) { // 받은 파일을 잠시 두는 이름: import/T_GAMEDATA
+    snprintf(out, cap, "%s%s", is_turn(sl) ? "T_" : "", sl->file);
+}
+
 static bool apply_import(void) {
-    char a[1200], b[1200], dir[1100];
+    char a[1200], b[1200], dir[1100], tmp[64];
+    bool with_turn = false;
+    for (int i = 0; i < nentries; i++) with_turn |= is_turn(entries[i].slot);
     snprintf(dir, sizeof dir, "%s/import", save_dir);
     SDL_CreateDirectory(dir);
     for (int i = 0; i < nentries; i++) {
-        path_of(a, sizeof a, "/import", entries[i].name);
+        import_name(tmp, sizeof tmp, entries[i].slot);
+        path_of(a, sizeof a, "/import", tmp);
         if (!SDL_SaveFile(a, entries[i].data, entries[i].size)) return false;
     }
     snprintf(dir, sizeof dir, "%s/backup", save_dir);
     SDL_CreateDirectory(dir);
-    bool moved[NFILES] = {0}, ok = true;
-    for (int i = 0; i < NFILES; i++) {
-        path_of(a, sizeof a, "", FILES[i]);
-        path_of(b, sizeof b, "/backup", FILES[i]);
+    if (with_turn) {
+        snprintf(dir, sizeof dir, "%s/turn", save_dir);
+        SDL_CreateDirectory(dir);
+        snprintf(dir, sizeof dir, "%s/turn/backup", save_dir);
+        SDL_CreateDirectory(dir);
+    }
+    bool moved[NSLOTS] = {0}, ok = true;
+    for (int i = 0; i < NSLOTS; i++) {
+        const slot_t *sl = &SLOTS[i];
+        if (is_turn(sl) && !with_turn) continue;
+        char bdir[32];
+        snprintf(bdir, sizeof bdir, "%s/backup", sl->dir);
+        path_of(a, sizeof a, sl->dir, sl->file);
+        path_of(b, sizeof b, bdir, sl->file);
         remove(b);
         if (SDL_GetPathInfo(a, NULL) && !(moved[i] = SDL_RenamePath(a, b))) ok = false;
     }
     for (int i = 0; ok && i < nentries; i++) {
-        path_of(a, sizeof a, "/import", entries[i].name);
-        path_of(b, sizeof b, "", entries[i].name);
+        const slot_t *sl = entries[i].slot;
+        import_name(tmp, sizeof tmp, sl);
+        path_of(a, sizeof a, "/import", tmp);
+        path_of(b, sizeof b, sl->dir, sl->file);
         if (!SDL_RenamePath(a, b)) ok = false;
     }
     if (ok) {
         snprintf(dir, sizeof dir, "%s/import", save_dir);
         SDL_RemovePath(dir);
     } else
-        for (int i = 0; i < NFILES; i++) if (moved[i]) {
-            path_of(a, sizeof a, "/backup", FILES[i]);
-            path_of(b, sizeof b, "", FILES[i]);
+        for (int i = 0; i < NSLOTS; i++) if (moved[i]) {
+            const slot_t *sl = &SLOTS[i];
+            char bdir[32];
+            snprintf(bdir, sizeof bdir, "%s/backup", sl->dir);
+            path_of(a, sizeof a, bdir, sl->file);
+            path_of(b, sizeof b, sl->dir, sl->file);
             SDL_RenamePath(a, b);
         }
     return ok;
@@ -302,4 +341,20 @@ void savefile_poll(void) {
         if (picked[0]) { if (dialog_import) import_from(picked); else export_to(picked); }
     }
     if (quit_after_message && !cpu.m[NET_UI + MESSAGE_OPEN]) request_exit();
+}
+
+// 시험(--ctrl): "saveexport 경로", "saveimport 경로". 들여오기는 확인 팝업 없이 바로 바꾼다.
+bool savefile_ctrl(const char *line) {
+    if (!strncmp(line, "saveexport ", 11)) { export_to(line + 11); return true; }
+    if (!strncmp(line, "saveimport ", 11)) {
+        size_t n;
+        SDL_free(loaded);
+        loaded = SDL_LoadFile(line + 11, &n);
+        bool ok = loaded && parse_bundle(loaded, n) && apply_import();
+        SDL_Log("시험 들여오기 %s: %s", line + 11, ok ? "성공" : "실패");
+        SDL_free(loaded);
+        loaded = NULL;
+        return true;
+    }
+    return false;
 }

@@ -326,6 +326,7 @@ static void ctrl_poll(void) {
         else if (!strncmp(lines[i], "edit ", 5)) ime_compose(lines[i] + 5);
         else if (!strcmp(lines[i], "settings")) ui_toggle_settings();
         else if (!strncmp(lines[i], "finger ", 7) || !strncmp(lines[i], "mouse ", 6)) inject_pointer(lines[i]);
+        else if (savefile_ctrl(lines[i])) {}
         else if (gamepad_ctrl(lines[i])) {}
         else if (turn_ctrl(lines[i])) {}
         else if (!strcmp(lines[i], "quit")) running = false;

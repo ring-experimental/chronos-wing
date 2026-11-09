@@ -71,8 +71,7 @@ enum {
     ITEM_EXPERT = 1,
     ITEM_MUSIC = 14, // 원본 상태표(0~13) 밖의 번호다. 0x1453bc에 넘기기 전에 상태 8로 바꾼다.
     ITEM_REPLAY = 15,
-    ITEM_TURN = 16, // 턴제 모드(엔딩 뒤 해금, turnmode.c). 고르면 폴더를 바꾸고 스토리모드(상태 0)로 넘긴다
-    STATE_STORY = 0,
+    ITEM_TURN = 16, // 턴제 모드(엔딩 뒤 해금, turnmode.c). 이어하기/처음부터 창을 열고, 고르면 폴더를 바꿔 스토리모드(상태 0)로 넘긴다
     PANEL_W = 0xb0,
     PANEL_H = 0xa0,
     ROW_H = 14,
@@ -233,14 +232,10 @@ void f_453bc(cpu_t *c) {
         next = ITEM_REPLAY;
         W8(got(GOT_MENU_ITEM), ITEM_REPLAY);
     }
-    if (next == ITEM_TURN) {
-        turn_begin();
-        c->r[0] = STATE_STORY;
-        orig_f_453bc(c);
-        return;
-    }
+    extern bool turn_starting;
+    if (turn_starting) { orig_f_453bc(c); return; } // 턴제 창에서 스토리모드로 넘기는 중
     turn_back_to_main();
-    active = next == ITEM_MUSIC ? &music_panel : next == ITEM_REPLAY ? &replay_panel : NULL;
+    active = next == ITEM_TURN ? &turn_panel : next == ITEM_MUSIC ? &music_panel : next == ITEM_REPLAY ? &replay_panel : NULL;
     if (active) c->r[0] = STATE_DEV;
     orig_f_453bc(c);
     if (menu_state() != STATE_DEV) return;

@@ -77,6 +77,7 @@ void savefile_choose(bool import);
 void savefile_ask_overwrite(void);
 void savefile_overwrite_answer(bool yes);
 void savefile_poll(void);
+bool savefile_ctrl(const char *line); // 시험용 제어 명령(saveexport, saveimport)
 bool savefile_dialog_open(void);
 extern int screen_w, screen_h;
 void request_exit(void);

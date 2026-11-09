@@ -13,6 +13,7 @@ typedef struct {
 
 extern const menu_panel music_panel;
 extern const menu_panel replay_panel;
+extern const menu_panel turn_panel;
 
 uint32_t menu_guest_text(const char *s); // 고정 문자열만 넘긴다. 게스트 메모리에 한 번 복사해 계속 쓴다.
 uint32_t menu_color(int r, int g, int b);
