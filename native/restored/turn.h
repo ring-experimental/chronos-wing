@@ -42,14 +42,20 @@ enum { NEED_NONE, NEED_MP_FULL, NEED_POWERBURN };
 enum { TS_MOTIONS = 8 };
 typedef struct {
     char name[28];
-    int mp, target, effect, power, magic, hits, pierce, status, chance, amount, turns, need, fx, ranged, level;
+    int mp, target, effect, power, magic, hits, pierce, status, chance, amount, turns, need, fx, ranged, level, unlock; // unlock: 동료가 배우는 레벨
     int motion[TS_MOTIONS], nmotion, mp_gain; // 주인공: H/DS 줄의 동작 id(피해는 원본 식)
 } tskill;
 typedef struct { uint32_t item; int slot, kind, id, count; char name[32]; } titem;
 
 int turn_hero_skills(int cls, tskill *basic, tskill *out, int max);
-int turn_member_skills(int member, tskill *basic, tskill *out, int max);
+int turn_member_skills(int member, int level, tskill *basic, tskill *out, int max);
 const char *turn_status_name(int s);
 int turn_pouch_items(titem *out, int max);
 void turn_pouch_consume(const titem *t);
 bool turn_item_effect(int kind, int *effect, int *hp, int *mp, int *status, int *turns);
+
+// 파티 편성(turnparty.c)
+bool turn_member_joined(int i);
+int turn_party_members(int *out);
+void turn_party_tick(void);
+bool turn_party_toggle(int i, const char **result);

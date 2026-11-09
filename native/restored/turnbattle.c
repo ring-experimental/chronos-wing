@@ -14,6 +14,7 @@ uint32_t gfx_screen_handle(void);
 
 #define T_ATTACK "\xb0\xf8\xb0\xdd"                                                         // 공격
 #define T_SKILL "\xbd\xba\xc5\xb3" // 스킬
+#define T_LOCKED "\xbe\xc6\xc1\xf7\x20\xb9\xe8\xbf\xec\xc1\xf6\x20\xb8\xf8\xc7\xd1\x20\xbd\xba\xc5\xb3\xc0\xcc\xb4\xd9" // 아직 배우지 못한 스킬이다
 #define T_ITEM "\xbe\xc6\xc0\xcc\xc5\xdb" // 아이템
 #define T_NO_SKILL "\xbe\xb5 \xbc\xf6 \xc0\xd6\xb4\xc2 \xbd\xba\xc5\xb3\xc0\xcc \xbe\xf8\xb4\xd9" // 쓸 수 있는 스킬이 없다
 #define T_NO_ITEM "\xc7\xe3\xb8\xae\xc1\xd6\xb8\xd3\xb4\xcf\xbf\xa1 \xbe\xb5 \xbe\xc6\xc0\xcc\xc5\xdb\xc0\xcc \xbe\xf8\xb4\xd9" // 허리주머니에 쓸 아이템이 없다
@@ -119,7 +120,6 @@ enum {
     KEY_UP = -1, KEY_DOWN = -2, KEY_LEFT = -3, KEY_RIGHT = -4, KEY_OK = -5, KEY_CLEAR = -16,
 };
 
-static const uint8_t JOIN_VAR[MEMBER_COUNT] = {0x03, 0x03, 0x03, 0x03, 0x07, 0x05, 0x05, 0x0f}; // 엔지, 레이, 리키, 후거스, 보우머, 쟝, 펭, 팡
 
 typedef enum { P_IDLE, P_WALK, P_HIT, P_DEAD, P_ATTACK, P_SKILL } pose;
 
@@ -367,7 +367,7 @@ static void add_hero(void) {
 
 // 동료 수치는 클라이언트에 없다. 장비를 따라 강해지도록 주인공 수치에 역할별 비율을 곱한다(정한 값).
 // 공격은 주인공 기본 공격 첫 타(원본 0x101ff4 × 0x102188), HP는 최대 HP, 방어는 장비 방어(0x101ef4), MP는 주인공 최대 MP의 1/3(최소 30).
-// 순서: 0 엔지(물리), 1 레이(힐), 2 리키(약품), 3 후거스(탱커), 4 보우머(버프), 5 쟝(둔화), 6 펭(화염), 7 팡(전격)
+// 순서: 0 엔지(물리), 1 레이(힐), 2 리키(검, 둔화), 3 후거스(탱커), 4 보우머(버프), 5 쟝(둔화), 6 펭(화염), 7 팡(전격)
 static const struct { int atk, hp, def; } MEMBER_RATE[MEMBER_COUNT] = {
     {100, 90, 90}, {60, 80, 80}, {75, 85, 85}, {70, 130, 130}, {65, 85, 85}, {95, 75, 70}, {95, 75, 70}, {95, 75, 70},
 };
@@ -381,27 +381,24 @@ static void add_member(int i) {
     a->party = true;
     a->member = i;
     memcpy(a->name, gstr(e + MEMBER_NAME), 27);
-    a->level = S8(e + MEMBER_LEVEL);
-    if (h && a->level < h->level) a->level = h->level;
+    a->level = R8(e + MEMBER_LEVEL);
     if (a->level < 1) a->level = 1;
     int hp = h ? h->hpmax : 100 + 40 * a->level, atk = h ? h->atk : 10 + 4 * a->level;
     int pdef = (int)CALL(FN_HERO_DEF, 0), mdef = (int)CALL(FN_HERO_DEF, 1), mp = h ? h->mpmax / 3 : 0;
-    a->hp = a->hpmax = hp * MEMBER_RATE[i].hp / 100;
-    a->atk = atk * MEMBER_RATE[i].atk / 100;
-    a->pdef = pdef * MEMBER_RATE[i].def / 100;
-    a->mdef = mdef * MEMBER_RATE[i].def / 100;
+    // 레벨 차 보정(정한 값): 주인공보다 레벨이 낮으면 (50+동료 레벨)/(50+주인공 레벨)만큼 약하다(대기 동료는 경험치를 절반만 받는다)
+    int lf = h ? (50 + a->level) * 100 / (50 + h->level) : 100;
+    if (lf > 100) lf = 100;
+    a->hp = a->hpmax = hp * MEMBER_RATE[i].hp / 100 * lf / 100;
+    a->atk = atk * MEMBER_RATE[i].atk / 100 * lf / 100;
+    a->pdef = pdef * MEMBER_RATE[i].def / 100 * lf / 100;
+    a->mdef = mdef * MEMBER_RATE[i].def / 100 * lf / 100;
     a->mp = a->mpmax = mp > 30 ? mp : 30;
     a->speed = 10 + a->level / 2;
     fprintf(stderr, "[turn] 동료 %d Lv%d HP %d 공격 %d 방어 %d/%d MP %d\n", i, a->level, a->hp, a->atk, a->pdef, a->mdef, a->mp);
-    a->nskills = turn_member_skills(i, &a->basic, a->skills, MAX_SKILLS);
+    a->nskills = turn_member_skills(i, a->level, &a->basic, a->skills, MAX_SKILLS);
     load_member_sprite(a, S16(e + MEMBER_EMD));
 }
 
-static bool member_joined(int i) {
-    cpu_t *c = &cpu;
-    if (getenv("CHRONOS_TURN_ALL")) return true; // 시험용: 모든 동료 합류로 본다
-    return R8(STORY_VARS + EXPERT_VAR) == STORY_DONE || R8(STORY_VARS + JOIN_VAR[i]) == STORY_DONE;
-}
 
 // 자리: 적은 왼쪽(오른쪽을 봄), 아군은 오른쪽(왼쪽을 봄). 화면 높이 320 기준 위쪽 3/5이 전장이다.
 static void place(void) {
@@ -482,17 +479,8 @@ static void open_battle(uint32_t first, int kind) {
         if (abs(S32(m + E_X) - fx) <= GROUP_RANGE && abs(S32(m + E_Y) - fy) <= GROUP_RANGE) add_enemy(m);
     }
     add_hero();
-    uint32_t hero = CALL(FN_HERO);
-    uint32_t link = R32(hero + H_LINK);
-    int linked = link >= MEMBERS && link < MEMBERS + MEMBER_COUNT * MEMBER_SIZE ? (int)((link - MEMBERS) / MEMBER_SIZE) : -1;
-    if (linked >= 0 && member_joined(linked)) add_member(linked);
-    for (int i = 0; i < MEMBER_COUNT && B.n < MAX_ACTORS; i++)
-        if (i != linked && member_joined(i) && B.n - 0 < MAX_ACTORS) {
-            int party = 0;
-            for (int k = 0; k < B.n; k++) party += B.a[k].party;
-            if (party >= MAX_PARTY) break;
-            add_member(i);
-        }
+    int mem[MAX_PARTY], nm = turn_party_members(mem); // 파티 편성(turnparty.c): 주인공 + 동료 최대 3명
+    for (int i = 0; i < nm && i < MAX_PARTY - 1; i++) add_member(mem[i]);
     place();
     B.first_strike = kind == 2;
     B.ambushed = kind == 1;
@@ -736,7 +724,8 @@ static void draw_scene(void) {
             uint32_t col = i == B.menu ? 0xffe060 : ok ? 0xffffff : 0x707070;
             if (i == B.menu) fill(6, y - 2, B.w - 12, 17, 0x30, 0x5f, 0xae);
             draw_text(12, y, B.w - 90, s, col, 0);
-            if (skills) snprintf(s, sizeof s, "MP %d", a->mplock_t > 0 ? 0 : a->skills[i].mp);
+            if (skills && a->skills[i].unlock > a->level) snprintf(s, sizeof s, "Lv%d", a->skills[i].unlock);
+            else if (skills) snprintf(s, sizeof s, "MP %d", a->mplock_t > 0 ? 0 : a->skills[i].mp);
             else snprintf(s, sizeof s, "x%d", B.items[i].count);
             draw_text(B.w - 70, y, 60, s, col, 0);
         }
@@ -844,7 +833,8 @@ static bool any_dead_ally(void) {
 
 static bool skill_usable(const actor *a, const tskill *k, const char **why) {
     const char *r = NULL;
-    if (a->mp < skill_cost(a, k)) r = T_NOMP;
+    if (k->unlock > a->level) r = T_LOCKED;
+    else if (a->mp < skill_cost(a, k)) r = T_NOMP;
     else if (k->need == NEED_MP_FULL && a->mp < a->mpmax) r = T_NEED_FULL;
     else if (k->need == NEED_POWERBURN && a->burn_t <= 0) r = T_NEED_BURN;
     else if (k->target == TG_DEAD && !any_dead_ally()) r = T_NO_DEAD;
@@ -1432,6 +1422,7 @@ static void step(void) {
 
 void turn_battle_tick(void) {
     turn_test_tick();
+    if (B.phase == S_CLOSED) turn_party_tick();
     if (B.phase == S_CLOSED && turn_loot_tick()) return;
     if (B.phase == S_CLOSED && blown_until) {
         cpu_t *c = &cpu;

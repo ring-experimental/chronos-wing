@@ -50,3 +50,6 @@
 4de84 turnbattle.c wrap
 35a04 turnbattle.c wrap
 17d7c turnloot.c wrap
+2eb44 turnparty.c wrap
+5bd54 turnparty.c wrap
+5bf84 turnparty.c wrap

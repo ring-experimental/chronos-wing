@@ -141,7 +141,7 @@ static const mdef MEMBER_SKILLS[8][5] = {
     {{"\xc4\xa1\xc0\xaf\xc0\xc7 \xb1\xe2\xbf\xf8", 10, TG_ALLY, EF_HEAL, 120, 1, 1, 0, 0, 0, 20}, {"\xc8\xb8\xba\xb9\xc0\xc7 \xb1\xe2\xbf\xf8", 22, TG_ALLIES, EF_HEAL, 60, 1, 1, 0, 0, 0, 12}, // 치유의 기원 / 회복의 기원
      {"\xba\xce\xc8\xb0\xc0\xc7 \xb1\xe2\xbf\xf8", 30, TG_DEAD, EF_REVIVE, 0, 1, 1, 0, 0, 0, 30}, {"\xc1\xa4\xc8\xad\xc0\xc7 \xb1\xe2\xbf\xf8", 8, TG_ALLY, EF_CURE, 0, 1, 1}, // 부활의 기원 / 정화의 기원
      {"\xc1\xa6\xbe\xd0\xc0\xc7 \xb1\xe2\xbf\xf8", 8, TG_ENEMY, EF_HIT, 80, 1, 1, 0, ST_GROGGY, 50}}, // 제압의 기원
-    {{"\xb2\xf6\xb2\xf6\xc0\xcc\xbe\xe0", 8, TG_ENEMY, EF_HIT, 60, 0, 1, 0, ST_SLOW, 90}, {"\xb2\xf6\xb2\xf6\xc0\xcc \xb0\xa1\xbd\xba", 14, TG_ENEMIES, EF_STATUS, 0, 1, 1, 0, ST_SLOW, 60}}, // 끈끈이약 / 끈끈이 가스
+    {{"\xb9\xdf\xb8\xf1 \xba\xa3\xb1\xe2", 8, TG_ENEMY, EF_HIT, 70, 0, 1, 0, ST_SLOW, 90}, {"\xc8\xd6\xb0\xa8\xb4\xc2 \xb0\xcb\xc7\xb3", 14, TG_ENEMIES, EF_HIT, 40, 0, 1, 0, ST_SLOW, 60}}, // 발목 베기 / 휘감는 검풍
     {{"\xb5\xb5\xb9\xdf", 6, TG_SELF, EF_TAUNT, 0, 0, 1, 0, 0, 0, 0, 3}, {"\xbc\xf6\xc8\xa3\xc0\xc7 \xc7\xd4\xbc\xba", 14, TG_ALLIES, EF_BUFF_DEF, 0, 0, 1, 0, 0, 0, 20, 3}, // 도발 / 수호의 함성
      {"\xb9\xdd\xb0\xdd \xc0\xda\xbc\xbc", 10, TG_SELF, EF_COUNTER, 0, 0, 1, 0, 0, 0, 0, 3}, {"\xb9\xe6\xc6\xd0 \xb0\xad\xc5\xb8", 10, TG_ENEMY, EF_HIT, 110, 0, 1, 0, ST_GROGGY, 50}}, // 반격 자세 / 방패 강타
     {{"\xc0\xfc\xc0\xc7 \xb0\xed\xbe\xe7", 14, TG_ALLIES, EF_BUFF_ATK, 0, 0, 1, 0, 0, 0, 20, 3}, {"\xbd\xc5\xbc\xd3\xc0\xc7 \xb3\xeb\xb7\xa1", 12, TG_ALLIES, EF_BUFF_SPD, 0, 0, 1, 0, 0, 0, 30, 3}}, // 전의 고양 / 신속의 노래
@@ -149,12 +149,16 @@ static const mdef MEMBER_SKILLS[8][5] = {
     {{"\xc8\xad\xbf\xb0\xb1\xb8", 12, TG_ENEMY, EF_HIT, 150, 1, 1, 0, ST_BURN, 35}, {"\xc8\xad\xbf\xb0 \xc6\xf8\xc7\xb3", 26, TG_ENEMIES, EF_HIT, 90, 1, 1, 0, ST_BURN, 20}}, // 화염구 / 화염 폭풍
     {{"\xb9\xf8\xb0\xb3", 12, TG_ENEMY, EF_HIT, 150, 1, 1, 0, ST_SHOCK, 35}, {"\xbf\xac\xbc\xe2 \xb9\xf8\xb0\xb3", 26, TG_ENEMIES, EF_HIT, 90, 1, 1, 0, ST_SHOCK, 20}}, // 번개 / 연쇄 번개
 };
+// 동료 스킬을 배우는 레벨(정한 값, 사용자 결정: 주인공 말고는 레벨이 오르면 스킬이 열린다). 순서는 위 표와 같다.
+static const int MEMBER_UNLOCK[8][5] = {
+    {1, 12}, {1, 16, 32, 8, 24}, {1, 12}, {1, 16, 24, 8}, {1, 12}, {1, 12}, {1, 12}, {1, 12},
+};
 static const struct { int status, chance; bool magic; } MEMBER_BASIC[8] = {
     {ST_SNOW, 10, false}, {ST_GROGGY, 10, true}, {ST_SLOW, 10, false}, {ST_GROGGY, 10, false},
     {0, 0, false}, {ST_SLOW, 10, true}, {ST_BURN, 10, true}, {ST_SHOCK, 10, true},
 };
 
-int turn_member_skills(int member, tskill *basic, tskill *out, int max) {
+int turn_member_skills(int member, int level, tskill *basic, tskill *out, int max) {
     memset(basic, 0, sizeof *basic);
     if (member < 0 || member > 7) return 0;
     snprintf(basic->name, sizeof basic->name, "%s", "\xb0\xf8\xb0\xdd"); // 공격
@@ -176,7 +180,12 @@ int turn_member_skills(int member, tskill *basic, tskill *out, int max) {
         s->hits = d->hits ? d->hits : 1; s->pierce = d->pierce; s->status = d->status; s->chance = d->chance;
         s->amount = d->amount; s->turns = d->turns; s->fx = -1;
         s->ranged = d->magic || d->target != TG_ENEMY;
+        s->unlock = MEMBER_UNLOCK[member][k];
     }
+    // 배우는 레벨 순으로 보인다
+    for (int i = 1; i < n; i++)
+        for (int k = i; k > 0 && out[k].unlock < out[k - 1].unlock; k--) { tskill t = out[k]; out[k] = out[k - 1]; out[k - 1] = t; }
+    (void)level;
     return n;
 }
 
