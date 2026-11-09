@@ -94,6 +94,7 @@ static void party_load(void) {
         for (int i = 0; i < b[3]; i++) if (b[4 + i] < MEMBER_COUNT) party[party_n++] = b[4 + i];
         seen = b[7] | b[8] << 8;
         if (v2) recruited = b[9] | b[10] << 8;
+        for (int k = 0; k < party_n; k++) recruited |= 1u << party[k]; // 파티에 있는 동료는 합류한 것이다(TP1 시절 면담으로 넣은 리키·후거스도)
     } else {
         // 처음: 원작에서 소울링크한 동료를 앞에 두고 합류한 순서대로 채운다. 이미 합류한 동료는 지금 합류한 것으로 보고 레벨을 맞춘다.
         cpu_t *c = &cpu;
