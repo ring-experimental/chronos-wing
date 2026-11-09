@@ -31,7 +31,7 @@ void turn_fill(int x, int y, int w, int h, int r, int g, int b);
 bool turn_loot_open(void);
 bool turn_loot_tick(void);
 bool turn_loot_key(int type, int code);
-void turn_loot_expect(const uint32_t *mons, int n);
+void turn_loot_expect(const uint32_t *mons, int n, bool forfeit_drops); // forfeit_drops: 도망·전멸, 이 적들의 드롭을 버린다
 
 // 스킬과 허리주머니(turnskill.c)
 enum { ST_NONE, ST_POISON, ST_SHOCK, ST_BURN, ST_GROGGY, ST_SNOW, ST_BLIND, ST_FART, ST_SLOW, ST_COUNT }; // 원작 상태 번호(0x14d908)

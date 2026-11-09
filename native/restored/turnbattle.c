@@ -1452,7 +1452,7 @@ static void finish(void) {
     int nd = 0;
     for (int i = 0; i < B.n; i++)
         if (!B.a[i].party && !B.a[i].alive && nd < MAX_ENEMIES) dead[nd++] = B.a[i].mon;
-    turn_loot_expect(dead, nd); // 처치 동작이 끝나 보상이 나온 뒤 획득 창을 한 번에 연다
+    turn_loot_expect(dead, nd, !B.won); // 처치 동작이 끝나 보상이 나온 뒤 획득 창을 한 번에 연다. 도망·전멸이면 드롭은 버린다(경험치는 준다)
     pop_clear();
     B.phase = S_CLOSED;
     B.n = 0;
@@ -1648,16 +1648,10 @@ static bool can_start(uint32_t m) {
     return monster_fightable(m) && CALL(FN_ATTACKABLE, m);
 }
 
-// 몬스터 갱신 1단계. 전투가 잡혔거나 열려 있으면 몬스터를 멈춘다. 몸이 닿으면 전투를 잡는다.
+// 몬스터 갱신 1단계. 전투가 잡혔거나 열려 있으면 몬스터를 멈춘다.
+// 몸이 닿기만 해서는 전투가 되지 않는다(사용자 결정 2026-11-09: 달려서 지나칠 수 있게). 주인공이 때리면 선제, 몬스터 공격에 맞으면 기습.
 void f_48bfc(cpu_t *c) {
-    uint32_t m = c->r[0];
     if (turn_here() && (pending_monster || B.phase != S_CLOSED)) return;
-    if (can_start(m) && CALL(FN_CONTACT, m, 0)) {
-        pending_monster = m;
-        pending_kind = 0;
-        return;
-    }
-    c->r[0] = m;
     orig_f_48bfc(c);
 }
 
@@ -1707,6 +1701,10 @@ bool turn_ctrl(const char *line) {
         sscanf(line + 13, "%d %d", &i, &s);
         for (int k = 0; k < B.n; k++) if (!B.a[k].party && e < 0) e = k;
         if (e >= 0 && i >= 0 && i < B.n) try_status(&B.a[e], &B.a[i], s, 100);
+        return true;
+    }
+    if (!strcmp(line + 5, "endflee") && B.phase != S_CLOSED) { // 시험: 지금 상태 그대로 도망으로 끝낸다(쓰러뜨린 적이 있어도)
+        B.fled = true; set_message(T_FLED, 30); B.phase = S_END; B.step_tick = 0;
         return true;
     }
     if (!strncmp(line + 5, "kill ", 5) && B.phase != S_CLOSED) { // 시험: 한 명 쓰러뜨리기

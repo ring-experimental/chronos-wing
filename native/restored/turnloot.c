@@ -32,6 +32,9 @@ static uint32_t wait_mon[WAIT_MAX];
 static int wait_n;
 static uint64_t wait_until;
 static bool open_now;
+static bool forfeit;        // 도망·전멸로 끝난 전투: 그 전투에서 쓰러뜨린 적의 드롭을 버린다(사용자 결정 2026-11-09)
+static uint64_t forfeit_end;
+enum { FORFEIT_GRACE_MS = 500 }; // 마지막 적이 죽음 처리를 끝낸 뒤 이만큼 더 버린다
 static uint16_t *shot;
 static size_t shot_size;
 
@@ -48,9 +51,22 @@ static void add_line(const char *name, dest to) {
 }
 
 // 드랍 만들기(x, y, 종류 s8, id s16). 턴제 모드에서는 바닥에 두지 않는다.
+static bool still_waiting(void);
+
+// 도망·전멸 뒤 버리는 중인가. 쓰러뜨린 적이 죽음 처리(상태 7)를 끝낼 때까지와 그 뒤 잠깐.
+static bool forfeiting(void) {
+    if (!forfeit) return false;
+    if (still_waiting()) { forfeit_end = 0; return true; }
+    if (!forfeit_end) forfeit_end = now_ms() + FORFEIT_GRACE_MS;
+    if (now_ms() < forfeit_end) return true;
+    forfeit = false;
+    return false;
+}
+
 void f_17d7c(cpu_t *c) {
     if (!turn_mode_on()) { orig_f_17d7c(c); return; }
     int kind = (int8_t)c->r[2], id = (int16_t)c->r[3];
+    if (forfeiting()) { fprintf(stderr, "[turn] 드랍 버림(도망·전멸한 전투): 종류 %d id %d\n", kind, id); return; }
     static uint32_t nb;
     if (!nb) nb = heap_alloc(NAME_BUF);
     memset(c->m + nb, 0, NAME_BUF);
@@ -66,7 +82,9 @@ void f_17d7c(cpu_t *c) {
 }
 
 // 전투에서 쓰러뜨린 몬스터. 필드에서 처치 동작이 끝나야(상태 7) 보상이 나오므로 그때까지 창을 미룬다.
-void turn_loot_expect(const uint32_t *mons, int n) {
+void turn_loot_expect(const uint32_t *mons, int n, bool forfeit_drops) {
+    forfeit = forfeit_drops && n > 0;
+    forfeit_end = 0;
     wait_n = 0;
     for (int i = 0; i < n && wait_n < WAIT_MAX; i++) if (mons[i]) wait_mon[wait_n++] = mons[i];
     wait_until = wait_n ? now_ms() + BATTLE_WAIT_MS : 0;
