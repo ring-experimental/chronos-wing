@@ -132,25 +132,26 @@ int turn_hero_skills(int cls, tskill *basic, tskill *out, int max) {
     return n;
 }
 
-// 동료 스킬(정한 값). 동료 순서는 0 엔지, 1 레이, 2 리키, 3 후거스, 4 보우머, 5 쟝, 6 펭, 7 팡.
-// 기본 공격의 상태이상은 원작 동료 공격표(EMD/C3 37~45, 공격 0)를 따른다. 쟝·펭은 사용자 결정으로 속성을 맞바꿨다.
+// 동료 순서는 0 엔지, 1 레이, 2 리키, 3 후거스, 4 보우머, 5 쟝, 6 펭, 7 팡. 기본 공격에도 같은 원작 상태이상을 10%로 붙인다.
 typedef struct { const char *name; int mp, target, effect, power, magic, hits, pierce, status, chance, amount, turns; } mdef;
-static const mdef MEMBER_SKILLS[8][4] = {
-    {{"\xbf\xac\xbc\xd3 \xba\xa3\xb1\xe2", 10, TG_ENEMY, EF_HIT, 180, 0, 3}, {"\xb0\xfc\xc5\xeb \xc0\xcf\xb0\xdd", 16, TG_ENEMY, EF_HIT, 170, 0, 1, 1}}, // 연속 베기 / 관통 일격
+// 동료 스킬(정한 값). 상태이상은 원작 동료 공격표(EMD/C3 37~45, 공격 0)를 따른다(사용자 결정 2026-11-09):
+// 엔지 눈사람, 레이·후거스 그로기, 리키·쟝 둔화(이속저주), 펭 화상, 팡 감전, 보우머 없음. 역할군(딜러·힐러·디버퍼·탱커·버퍼·마법)은 그대로 둔다.
+static const mdef MEMBER_SKILLS[8][5] = {
+    {{"\xbe\xf3\xc0\xbd \xba\xa3\xb1\xe2", 10, TG_ENEMY, EF_HIT, 160, 0, 2, 0, ST_SNOW, 30}, {"\xb0\xfc\xc5\xeb \xc0\xcf\xb0\xdd", 16, TG_ENEMY, EF_HIT, 170, 0, 1, 1}}, // 얼음 베기 / 관통 일격
     {{"\xc4\xa1\xc0\xaf\xc0\xc7 \xb1\xe2\xbf\xf8", 10, TG_ALLY, EF_HEAL, 120, 1, 1, 0, 0, 0, 20}, {"\xc8\xb8\xba\xb9\xc0\xc7 \xb1\xe2\xbf\xf8", 22, TG_ALLIES, EF_HEAL, 60, 1, 1, 0, 0, 0, 12}, // 치유의 기원 / 회복의 기원
-     {"\xba\xce\xc8\xb0\xc0\xc7 \xb1\xe2\xbf\xf8", 30, TG_DEAD, EF_REVIVE, 0, 1, 1, 0, 0, 0, 30}, {"\xc1\xa4\xc8\xad\xc0\xc7 \xb1\xe2\xbf\xf8", 8, TG_ALLY, EF_CURE, 0, 1, 1}}, // 부활의 기원 / 정화의 기원
-    {{"\xb5\xb6\xbe\xe0\xba\xb4", 8, TG_ENEMY, EF_HIT, 50, 0, 1, 0, ST_POISON, 80}, {"\xc8\xad\xbf\xb0\xba\xb4", 12, TG_ENEMY, EF_HIT, 70, 1, 1, 0, ST_BURN, 70}, // 독약병 / 화염병
-     {"\xbc\xb6\xb1\xa4\xc5\xba", 14, TG_ENEMIES, EF_STATUS, 0, 1, 1, 0, ST_BLIND, 50}}, // 섬광탄
+     {"\xba\xce\xc8\xb0\xc0\xc7 \xb1\xe2\xbf\xf8", 30, TG_DEAD, EF_REVIVE, 0, 1, 1, 0, 0, 0, 30}, {"\xc1\xa4\xc8\xad\xc0\xc7 \xb1\xe2\xbf\xf8", 8, TG_ALLY, EF_CURE, 0, 1, 1}, // 부활의 기원 / 정화의 기원
+     {"\xc1\xa6\xbe\xd0\xc0\xc7 \xb1\xe2\xbf\xf8", 8, TG_ENEMY, EF_HIT, 80, 1, 1, 0, ST_GROGGY, 50}}, // 제압의 기원
+    {{"\xb2\xf6\xb2\xf6\xc0\xcc\xbe\xe0", 8, TG_ENEMY, EF_HIT, 60, 0, 1, 0, ST_SLOW, 90}, {"\xb2\xf6\xb2\xf6\xc0\xcc \xb0\xa1\xbd\xba", 14, TG_ENEMIES, EF_STATUS, 0, 1, 1, 0, ST_SLOW, 60}}, // 끈끈이약 / 끈끈이 가스
     {{"\xb5\xb5\xb9\xdf", 6, TG_SELF, EF_TAUNT, 0, 0, 1, 0, 0, 0, 0, 3}, {"\xbc\xf6\xc8\xa3\xc0\xc7 \xc7\xd4\xbc\xba", 14, TG_ALLIES, EF_BUFF_DEF, 0, 0, 1, 0, 0, 0, 20, 3}, // 도발 / 수호의 함성
-     {"\xb9\xdd\xb0\xdd \xc0\xda\xbc\xbc", 10, TG_SELF, EF_COUNTER, 0, 0, 1, 0, 0, 0, 0, 3}}, // 반격 자세
+     {"\xb9\xdd\xb0\xdd \xc0\xda\xbc\xbc", 10, TG_SELF, EF_COUNTER, 0, 0, 1, 0, 0, 0, 0, 3}, {"\xb9\xe6\xc6\xd0 \xb0\xad\xc5\xb8", 10, TG_ENEMY, EF_HIT, 110, 0, 1, 0, ST_GROGGY, 50}}, // 반격 자세 / 방패 강타
     {{"\xc0\xfc\xc0\xc7 \xb0\xed\xbe\xe7", 14, TG_ALLIES, EF_BUFF_ATK, 0, 0, 1, 0, 0, 0, 20, 3}, {"\xbd\xc5\xbc\xd3\xc0\xc7 \xb3\xeb\xb7\xa1", 12, TG_ALLIES, EF_BUFF_SPD, 0, 0, 1, 0, 0, 0, 30, 3}}, // 전의 고양 / 신속의 노래
-    {{"\xb3\xc3\xb1\xe2\xc5\xba", 12, TG_ENEMY, EF_HIT, 140, 1, 1, 0, ST_SNOW, 30}, {"\xb4\xab\xba\xb8\xb6\xf3", 26, TG_ENEMIES, EF_HIT, 85, 1, 1, 0, ST_SNOW, 15}}, // 냉기탄 / 눈보라
+    {{"\xbd\xc3\xb0\xa3 \xc1\xf6\xbf\xac", 12, TG_ENEMY, EF_HIT, 130, 1, 1, 0, ST_SLOW, 70}, {"\xbd\xc3\xb0\xa3 \xbf\xd6\xb0\xee", 26, TG_ENEMIES, EF_HIT, 80, 1, 1, 0, ST_SLOW, 40}}, // 시간 지연 / 시간 왜곡
     {{"\xc8\xad\xbf\xb0\xb1\xb8", 12, TG_ENEMY, EF_HIT, 150, 1, 1, 0, ST_BURN, 35}, {"\xc8\xad\xbf\xb0 \xc6\xf8\xc7\xb3", 26, TG_ENEMIES, EF_HIT, 90, 1, 1, 0, ST_BURN, 20}}, // 화염구 / 화염 폭풍
     {{"\xb9\xf8\xb0\xb3", 12, TG_ENEMY, EF_HIT, 150, 1, 1, 0, ST_SHOCK, 35}, {"\xbf\xac\xbc\xe2 \xb9\xf8\xb0\xb3", 26, TG_ENEMIES, EF_HIT, 90, 1, 1, 0, ST_SHOCK, 20}}, // 번개 / 연쇄 번개
 };
 static const struct { int status, chance; bool magic; } MEMBER_BASIC[8] = {
     {ST_SNOW, 10, false}, {ST_GROGGY, 10, true}, {ST_SLOW, 10, false}, {ST_GROGGY, 10, false},
-    {0, 0, false}, {ST_SNOW, 10, true}, {ST_BURN, 10, true}, {ST_SHOCK, 10, true},
+    {0, 0, false}, {ST_SLOW, 10, true}, {ST_BURN, 10, true}, {ST_SHOCK, 10, true},
 };
 
 int turn_member_skills(int member, tskill *basic, tskill *out, int max) {
@@ -166,7 +167,7 @@ int turn_member_skills(int member, tskill *basic, tskill *out, int max) {
     basic->chance = MEMBER_BASIC[member].chance;
     basic->fx = -1;
     int n = 0;
-    for (int k = 0; k < 4 && n < max && MEMBER_SKILLS[member][k].name; k++) {
+    for (int k = 0; k < 5 && n < max && MEMBER_SKILLS[member][k].name; k++) {
         const mdef *d = &MEMBER_SKILLS[member][k];
         tskill *s = &out[n++];
         memset(s, 0, sizeof *s);

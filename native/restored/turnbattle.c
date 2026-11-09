@@ -367,7 +367,7 @@ static void add_hero(void) {
 
 // 동료 수치는 클라이언트에 없다. 장비를 따라 강해지도록 주인공 수치에 역할별 비율을 곱한다(정한 값).
 // 공격은 주인공 기본 공격 첫 타(원본 0x101ff4 × 0x102188), HP는 최대 HP, 방어는 장비 방어(0x101ef4), MP는 주인공 최대 MP의 1/3(최소 30).
-// 순서: 0 엔지(물리), 1 레이(힐), 2 리키(약품), 3 후거스(탱커), 4 보우머(버프), 5 쟝(냉기), 6 펭(화염), 7 팡(전격)
+// 순서: 0 엔지(물리), 1 레이(힐), 2 리키(약품), 3 후거스(탱커), 4 보우머(버프), 5 쟝(둔화), 6 펭(화염), 7 팡(전격)
 static const struct { int atk, hp, def; } MEMBER_RATE[MEMBER_COUNT] = {
     {100, 90, 90}, {60, 80, 80}, {75, 85, 85}, {70, 130, 130}, {65, 85, 85}, {95, 75, 70}, {95, 75, 70}, {95, 75, 70},
 };
@@ -1041,7 +1041,7 @@ static void strike(actor *from, actor *to, const tskill *k, int i) {
     if (dmg > 0) hit(to, dmg);
     if (from->hero && !k->magic && k->hits) from->mp += k->mp_gain / k->hits; // 원작: 적중하면 MP를 얻는다(H/DS +6)
     if (from->mp > from->mpmax) from->mp = from->mpmax;
-    fprintf(stderr, "[turn] 타격 %d → %d: %d(HP %d → %d)\n", (int)(from - B.a), (int)(to - B.a), dmg, hp0, to->hp);
+    fprintf(stderr, "[turn] 타격 %d → %d: %d(HP %d → %d) 상태 %d %d%%\n", (int)(from - B.a), (int)(to - B.a), dmg, hp0, to->hp, k->status, k->chance);
     if (k->status) try_status(from, to, k->status, k->chance);
     // 반격: 적의 직접 공격을 받고 살아 있으면 기본 공격의 70%로 되친다(정한 값)
     if (to->party && to->alive && to->counter_t > 0 && !from->party && from->alive && !k->ranged) {
