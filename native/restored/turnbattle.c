@@ -118,7 +118,8 @@ enum {
     // 적 HP는 전투마다 파티 화력에 맞춘다(사용자 결정 2026-11-09): 파티 한 바퀴 예상 피해로 처음 마주친 적이 일반이면 약 3바퀴, 보스가 있으면 약 8바퀴.
     // 같은 배율을 모든 적에 써서 원작 HP 비율은 유지한다. 배율은 원작 HP의 3%~500%로 묶는다(초반에는 파티 4인이 원작 한 명보다 세서 원작보다 커질 수 있다).
     ROUNDS_NORMAL = 3, ROUNDS_BOSS = 8, HP_SCALE_MIN = 3, HP_SCALE_MAX = 500,
-    ENEMY_DMG_PCT = 50,
+    // 적 피해도 전투마다 맞춘다(사용자 결정): 처음 마주친 적의 한 번 공격 예상 피해(파티 평균)가 대상 최대 HP의 약 12%(보스 20%)가 되게.
+    HIT_PCT_NORMAL = 12, HIT_PCT_BOSS = 20, DMG_SCALE_MIN = 10, DMG_SCALE_MAX = 1000, // 배율 %, 원작 피해의 0.1~10배
     COOLDOWN_MS = 2500,         // 정한 값: 전투가 끝난 뒤 다시 마주치지 않는 시간
     KEY_UP = -1, KEY_DOWN = -2, KEY_LEFT = -3, KEY_RIGHT = -4, KEY_OK = -5, KEY_CLEAR = -16,
 };
@@ -185,6 +186,7 @@ static struct {
     int msg_ticks;
     bool won, lost, fled, first_strike, ambushed;
     int boss_fled;         // 도주 문턱을 넘은 보스 번호 + 1
+    int dmg_pct;           // 이번 전투의 적 피해 배율 %
     uint64_t last_tick;
     struct { uint32_t num; int actor; } pop[MAX_POPUPS]; // 피해 숫자(원본 숫자 개체)
     struct { int anim, x, y, tick; } fx[MAX_FX];         // 주인공 동작 묶음의 효과 동작(0x17ead0)
@@ -392,6 +394,8 @@ static void add_member(int i) {
 
 
 // 자리: 적은 왼쪽(오른쪽을 봄), 아군은 오른쪽(왼쪽을 봄). 화면 높이 320 기준 위쪽 3/5이 전장이다.
+static int enemy_damage_x(actor *from, actor *to, bool est);
+
 // 파티 한 바퀴 예상 피해(무작위 없이): 주인공은 기본 콤보 동작마다 원본 식(0x101ff4 × 0x102188 - 방어 + 상성), 동료는 공격력 - 방어.
 static int party_round_damage(const actor *e) {
     cpu_t *c = &cpu;
@@ -420,6 +424,7 @@ static int party_round_damage(const actor *e) {
 }
 
 static void scale_enemies(void) {
+    B.dmg_pct = 100;
     const actor *ref = NULL;
     bool boss = false;
     for (int i = 0; i < B.n; i++) {
@@ -441,6 +446,19 @@ static void scale_enemies(void) {
         if (a->hpmax < 1) a->hpmax = 1;
         if (a->hp < 1 && a->ohp > 0) a->hp = 1;
     }
+    // 적 피해 배율: 기준 적의 첫 공격(공격표 0번)을 파티원마다 예상해 평균 HP 비율을 목표에 맞춘다
+    actor *r = (actor *)ref;
+    int saved = r->attack, sum_d = 0, sum_hp = 0;
+    r->attack = 0;
+    for (int i = 0; i < B.n; i++)
+        if (B.a[i].party) { sum_d += enemy_damage_x(r, &B.a[i], true); sum_hp += B.a[i].hpmax; }
+    r->attack = saved;
+    int hit = boss ? HIT_PCT_BOSS : HIT_PCT_NORMAL;
+    int64_t dp = sum_d > 0 ? (int64_t)sum_hp * hit / sum_d : 100;
+    if (dp < DMG_SCALE_MIN) dp = DMG_SCALE_MIN;
+    if (dp > DMG_SCALE_MAX) dp = DMG_SCALE_MAX;
+    B.dmg_pct = (int)dp;
+    fprintf(stderr, "[turn] 적 피해 배율 %d%%(예상 한 번 %d, 아군 HP 합 %d)\n", B.dmg_pct, sum_d, sum_hp);
     fprintf(stderr, "[turn] 적 HP 배율 %d.%d%%(파티 한 바퀴 %d, 기준 %s HP %d, 목표 %d바퀴)\n", (int)(pm / 10), (int)(pm % 10),
             party_round_damage(ref), boss ? "보스" : "일반", ref->ohpmax, boss ? ROUNDS_BOSS : ROUNDS_NORMAL);
 }
@@ -1016,8 +1034,10 @@ static int member_damage(actor *from, actor *to, const tskill *k) {
 }
 
 // 적 → 주인공: 원본 0x14de84(공격력, 치명타, 방어 0x101ef4 + 감소 0x101f6c, 상성 0x12e6ec). 적 → 동료: 공격력 - 방어(정한 값).
-// 공격력·종류는 이번 공격 번호(+0x1aa)의 공격표 항목에서 원본 함수로 읽는다.
-static int enemy_damage(actor *from, actor *to) {
+// 공격력·종류는 이번 공격 번호(+0x1aa)의 공격표 항목에서 원본 함수로 읽는다. est면 치명타·무작위 없이 배율 전 값(전투 배율 계산용).
+static int enemy_damage_x(actor *from, actor *to, bool est);
+static int enemy_damage(actor *from, actor *to) { return enemy_damage_x(from, to, false); }
+static int enemy_damage_x(actor *from, actor *to, bool est) {
     cpu_t *c = &cpu;
     uint32_t m = from->mon;
     int saved = R8(m + E_ATTACK);
@@ -1025,9 +1045,9 @@ static int enemy_damage(actor *from, actor *to) {
     int kind = (int)CALL(FN_MON_ATK_KIND, m);
     int atk = (int)CALL(FN_MON_ATK, m, 0);
     W8(m + E_ATTACK, (uint8_t)saved);
-    bool crit = rnd(100) <= (int)(int8_t)CALL(FN_MON_CRIT, m);
+    bool crit = !est && rnd(100) <= (int)(int8_t)CALL(FN_MON_CRIT, m);
     if (crit) atk = atk * (S8(m + 0x178) * 7 + 100) / 100;
-    atk = vary(atk);
+    if (!est) atk = vary(atk);
     int dmg;
     if (to->hero) {
         int def = (int)CALL(FN_HERO_DEF, kind), cut = (int)CALL(FN_HERO_DEF_CUT, def, kind, crit);
@@ -1036,7 +1056,7 @@ static int enemy_damage(actor *from, actor *to) {
     } else {
         dmg = atk - (kind ? to->mdef : to->pdef);
     }
-    dmg = dmg * ENEMY_DMG_PCT / 100;
+    if (!est) dmg = (int)((int64_t)dmg * B.dmg_pct / 100);
     return dmg < 1 ? 1 : dmg;
 }
 
