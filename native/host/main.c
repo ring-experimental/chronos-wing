@@ -9,6 +9,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 char game_dir[1024], save_dir[1024];
 static SDL_Window *win;
@@ -19,6 +22,18 @@ static const char *ctrl_path;
 static uint32_t *last_frame;
 static uint64_t frames;
 extern float audio_peak;
+
+#ifdef __EMSCRIPTEN__
+// 저장 폴더(/persist, IndexedDB)를 내려 쓴다. 파일이 바뀌었을 때만 실제로 쓰이므로 주기적으로 부른다. now면 주기를 기다리지 않는다.
+enum { WEB_SYNC_MS = 2000 };
+static void web_save_sync(bool now) {
+    static uint64_t last;
+    uint64_t t = SDL_GetTicks();
+    if (!now && t - last < WEB_SYNC_MS) return;
+    last = t;
+    EM_ASM({ if (Module.saveSync) Module.saveSync(); });
+}
+#endif
 
 static int width_arg;
 enum { ANDROID_INPUT_POLL_MS = 8 };
@@ -50,6 +65,13 @@ bool game_shortcuts_bought(void) { return cpu.m && cpu.m[0x1b0e58 + 600]; }
 // 높이 320을 유지하고 폭은 모니터 비율을 따른다(240~640). 창 모드 기본값은 원작 폭이다.
 static int choose_width(bool windowed) {
     int w = width_arg;
+#ifdef __EMSCRIPTEN__
+    // 페이지 크기의 비율을 따른다. 세로로 든 화면은 원작 폭이다.
+    if (!w) {
+        int pw = EM_ASM_INT({ return window.innerWidth; }), ph = EM_ASM_INT({ return window.innerHeight; });
+        w = pw > ph && ph > 0 ? 320 * pw / ph : 240;
+    }
+#endif
     if (!w && !windowed) {
         const SDL_DisplayMode *m = SDL_GetDesktopDisplayMode(SDL_GetPrimaryDisplay());
 #ifdef __ANDROID__
@@ -246,6 +268,7 @@ static void dump_memory(const char *name) {
 }
 
 // CHRONOS_SCRIPT=<파일>: `<프레임> key|up|quit [이름]` 줄을 그만큼 표시한 뒤 실행한다.
+// CHRONOS_VCLOCK과 함께면 첫 값은 가상 시계의 ms다. 화면을 다시 그리지 않는 상태에서도 대본이 멈추지 않는다.
 static void script_poll(void) {
     static FILE *f;
     static int init, have;
@@ -260,7 +283,7 @@ static void script_poll(void) {
             if (sscanf(line, "%llu %15s %15s", &at, cmd, name) < 2) continue;
             have = 1;
         }
-        if (at > frames) return;
+        if (at > (vclock_on() ? now_ms() : frames)) return;
         have = 0;
         int k = key_from_name(name);
         if (!strcmp(cmd, "key") && k) send_key(2, k);
@@ -365,8 +388,74 @@ static bool wait_event(SDL_Event *e, int ms) {
 #endif
 }
 
+// 메인 루프 한 바퀴: 입력, 타이머(게임 진행), 그리기. 웹에서는 브라우저가 화면 주기마다 부른다.
+static bool windowed, paused, stalled;
+
+static void tick(void) {
+    SDL_Event e;
+    int64_t wait = timers_next_ms();
+    // 시험용 제어 파일만 짧게 폴링한다. 평소에는 입력이나 다음 타이머까지 잔다.
+    int64_t max_wait = ctrl_path || turn_battle_open() ? 10 : 100;
+    if (wait > max_wait || wait < 0) wait = max_wait;
+    // 가상 시계: 기다릴 만큼 건너뛴다. 게임이 멈춘 동안(설정, 대사 기록, 턴제 전투)은 밀린 타이머가 돌지 않으므로 10ms씩 흐르게 한다.
+    if (vclock_on()) { vclock_skip(wait || !stalled ? (uint64_t)wait : 10); wait = 0; }
+#ifdef __EMSCRIPTEN__
+    wait = 0; // 브라우저에서는 기다리지 않고 돌아간다.
+#endif
+    if (wait_event(&e, (int)wait)) {
+        do {
+            if (e.type == SDL_EVENT_QUIT) { SDL_Log("종료 이벤트"); running = false; }
+            else if (e.type == SDL_EVENT_WILL_ENTER_BACKGROUND) { ui_release_all(); gamepad_release_all(); }
+            if (gamepad_event(&e)) continue;
+            if (ui_event(&e)) continue;
+            if (ime_event(&e)) continue;
+            else if ((e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) && !e.key.repeat) {
+                if (e.key.scancode == SDL_SCANCODE_F11 && e.type == SDL_EVENT_KEY_DOWN) {
+                    windowed = !windowed;
+                    SDL_SetWindowFullscreen(win, !windowed);
+                    continue;
+                }
+                if (e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_TAB) { ui_toggle_auto(); continue; }
+                if (e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_L) { dialog_log_toggle(); continue; }
+                int k = key_from_scancode(e.key.scancode);
+                if (k) send_key(e.type == SDL_EVENT_KEY_DOWN ? 2 : 3, k);
+            }
+        } while (SDL_PollEvent(&e));
+    }
+    ctrl_poll();
+    gamepad_tick();
+    savefile_poll();
+    ime_poll();
+    // 설정 중이나 파일 창이 열린 동안에는 게임을 멈춘다.
+    bool modal = ui_modal() || savefile_dialog_open();
+    if (modal != paused) { paused = modal; audio_pause(paused); }
+    // 대사 기록 창이 열린 동안에도 게임을 멈춘다. 음악은 계속 나온다.
+    // 턴제 전투 중에도 게임을 멈추고 전투 화면이 직접 그린다.
+    bool frozen = dialog_log_is_open() || turn_battle_open();
+    stalled = paused || frozen;
+    if (!paused && !frozen) {
+        dialog_auto_tick();
+        replay_tick();
+        timers_run();
+    }
+    if (!paused) turn_battle_tick();
+    if (frame_dirty || paused || frozen) render_frame();
+}
+
+#ifdef __EMSCRIPTEN__
+// 게임이 종료를 고르면 저장을 내려 쓴 뒤 페이지에 알린다(web/shell.html의 Module.onGameExit).
+static void web_tick(void) {
+    tick();
+    web_save_sync(false);
+    if (running) return;
+    emscripten_cancel_main_loop();
+    web_save_sync(true);
+    EM_ASM({ if (Module.onGameExit) Module.onGameExit(); });
+}
+#endif
+
 int main(int argc, char **argv) {
-    bool windowed = false, force_pad = false;
+    bool force_pad = false;
     const char *soundfont = NULL, *save = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--windowed")) windowed = true;
@@ -401,13 +490,21 @@ int main(int argc, char **argv) {
     if (l && save_dir[l - 1] == '/') save_dir[l - 1] = 0;
     SDL_CreateDirectory(save_dir);
 
-    if (!SDL_CreateWindowAndRenderer("크로노스 윙", screen_w * 2, 640, windowed ? SDL_WINDOW_RESIZABLE : SDL_WINDOW_FULLSCREEN, &win, &ren)) {
+#ifdef __EMSCRIPTEN__
+    SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_FILL_DOCUMENT;
+#else
+    SDL_WindowFlags window_flags = windowed ? SDL_WINDOW_RESIZABLE : SDL_WINDOW_FULLSCREEN;
+#endif
+    if (!SDL_CreateWindowAndRenderer("크로노스 윙", screen_w * 2, 640, window_flags, &win, &ren)) {
         SDL_Log("창 생성 실패: %s", SDL_GetError());
         return 1;
     }
     SDL_SetRenderVSync(ren, 1);
     char ui_dir[1100], ui_cfg[1100];
     snprintf(ui_dir, sizeof ui_dir, "%s/../ui", game_dir);
+#ifdef __EMSCRIPTEN__
+    snprintf(ui_dir, sizeof ui_dir, "/ui");
+#endif
     snprintf(ui_cfg, sizeof ui_cfg, "%s/../ui.ini", save_dir);
     gamepad_init();
     if (!ui_init(win, ren, ui_dir, ui_cfg, force_pad)) SDL_Log("UI를 열지 못함: 패드와 설정 없이 진행");
@@ -422,53 +519,14 @@ int main(int argc, char **argv) {
     uint32_t start[2] = {0, 0};
     guest_call(FN_START, start, 2);
 
-    bool paused = false;
-    while (running) {
-        SDL_Event e;
-        int64_t wait = timers_next_ms();
-        // 시험용 제어 파일만 짧게 폴링한다. 평소에는 입력이나 다음 타이머까지 잔다.
-        int64_t max_wait = ctrl_path || turn_battle_open() ? 10 : 100;
-        if (wait > max_wait || wait < 0) wait = max_wait;
-        if (wait_event(&e, (int)wait)) {
-            do {
-                if (e.type == SDL_EVENT_QUIT) { SDL_Log("종료 이벤트"); running = false; }
-                else if (e.type == SDL_EVENT_WILL_ENTER_BACKGROUND) { ui_release_all(); gamepad_release_all(); }
-                if (gamepad_event(&e)) continue;
-                if (ui_event(&e)) continue;
-                if (ime_event(&e)) continue;
-                else if ((e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) && !e.key.repeat) {
-                    if (e.key.scancode == SDL_SCANCODE_F11 && e.type == SDL_EVENT_KEY_DOWN) {
-                        windowed = !windowed;
-                        SDL_SetWindowFullscreen(win, !windowed);
-                        continue;
-                    }
-                    if (e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_TAB) { ui_toggle_auto(); continue; }
-                    if (e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_L) { dialog_log_toggle(); continue; }
-                    int k = key_from_scancode(e.key.scancode);
-                    if (k) send_key(e.type == SDL_EVENT_KEY_DOWN ? 2 : 3, k);
-                }
-            } while (SDL_PollEvent(&e));
-        }
-        ctrl_poll();
-        gamepad_tick();
-        savefile_poll();
-        ime_poll();
-        // 설정 중이나 파일 창이 열린 동안에는 게임을 멈춘다.
-        bool modal = ui_modal() || savefile_dialog_open();
-        if (modal != paused) { paused = modal; audio_pause(paused); }
-        // 대사 기록 창이 열린 동안에도 게임을 멈춘다. 음악은 계속 나온다.
-        // 턴제 전투 중에도 게임을 멈추고 전투 화면이 직접 그린다.
-        bool frozen = dialog_log_is_open() || turn_battle_open();
-        if (!paused && !frozen) {
-            dialog_auto_tick();
-            replay_tick();
-            timers_run();
-        }
-        if (!paused) turn_battle_tick();
-        if (frame_dirty || paused || frozen) render_frame();
-    }
+#ifdef __EMSCRIPTEN__
+    emscripten_set_main_loop(web_tick, 0, true);
+#endif
+    while (running) tick();
     SDL_Log("메인 루프 끝, 프레임 %llu", (unsigned long long)frames);
     fprintf(stderr, "종료, 프레임 %llu, 소리 최대값 %.3f\n", (unsigned long long)frames, audio_peak);
+    extern uint64_t guest_ticks;
+    fprintf(stderr, "게스트 실행 %.2f초, 인터프리터 명령 %llu\n", (double)guest_ticks / SDL_GetPerformanceFrequency(), (unsigned long long)cpu.icount);
     SDL_Quit();
     return 0;
 }

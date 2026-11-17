@@ -62,3 +62,7 @@
 72710 turnbag.c wrap
 39804 turnbag.c wrap
 3abc0 turnbag.c wrap
+5b8c crypt.c wrap
+69f4 blit.c wrap
+a328 blit.c wrap
+b80c blit.c wrap

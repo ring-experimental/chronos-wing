@@ -51,6 +51,8 @@ void defer_call(uint32_t cb, uint32_t a0, uint32_t a1, uint64_t ms);
 void timers_run(void);
 int64_t timers_next_ms(void);
 uint64_t now_ms(void);
+bool vclock_on(void);
+void vclock_skip(uint64_t ms);
 
 // 표시
 void video_present(uint32_t fb_handle);

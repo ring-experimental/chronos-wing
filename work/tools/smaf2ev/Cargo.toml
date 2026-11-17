@@ -6,4 +6,12 @@ edition = "2021"
 [dependencies]
 smaf-player = "0.1.4"
 
+
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[profile.release]
+opt-level = "s"
+
 [workspace]

@@ -311,6 +311,15 @@ static void SDLCALL on_pick(void *ud, const char *const *files, int filter) {
 
 bool savefile_dialog_open(void) { return SDL_GetAtomicInt(&dialog_state) != 0; }
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+// 브라우저에는 파일 창 대신 페이지가 고르기 화면을 띄우고(web/shell.html의 Module.pickSave), 고른 파일을 임시 폴더에 써서 알려 준다. 취소면 빈 문자열이다.
+EMSCRIPTEN_KEEPALIVE void web_save_picked(const char *path) {
+    const char *files[] = {path, NULL};
+    on_pick(NULL, path && path[0] ? files : NULL, 0);
+}
+#endif
+
 // 내보내기 기본값: 문서 폴더의 chronos-wing-YYYY-MM-DD.cwsave. 문서 폴더를 모르면 이름만 넘긴다.
 static void default_export_path(char *out, size_t cap) {
     SDL_Time now = 0;
@@ -327,6 +336,17 @@ void savefile_choose(bool import) {
     SDL_SetAtomicInt(&dialog_state, 1);
     const char *test = getenv("CHRONOS_SAVEFILE_TEST"); // 자동 시험용
     if (test) { const char *f[] = {test, NULL}; on_pick(NULL, f, 0); return; }
+#ifdef __EMSCRIPTEN__
+    // 내보내기는 임시 폴더에 만든 뒤 내려받게 한다(savefile_poll).
+    if (import) { EM_ASM({ Module.pickSave(); }); return; }
+    char name[1200], tmp[1300];
+    default_export_path(name, sizeof name);
+    const char *base = strrchr(name, '/');
+    snprintf(tmp, sizeof tmp, "/tmp/%s", base ? base + 1 : name);
+    const char *made[] = {tmp, NULL};
+    on_pick(NULL, made, 0);
+    return;
+#endif
     if (import) SDL_ShowOpenFileDialog(on_pick, NULL, host_window(), filter, 1, NULL, false);
     else {
         char path[1200];
@@ -339,6 +359,9 @@ void savefile_poll(void) {
     if (SDL_GetAtomicInt(&dialog_state) == 2) {
         SDL_SetAtomicInt(&dialog_state, 0);
         if (picked[0]) { if (dialog_import) import_from(picked); else export_to(picked); }
+#ifdef __EMSCRIPTEN__
+        if (picked[0] && !dialog_import) EM_ASM({ Module.downloadFile(UTF8ToString($0)); }, picked);
+#endif
     }
     if (quit_after_message && !cpu.m[NET_UI + MESSAGE_OPEN]) request_exit();
 }

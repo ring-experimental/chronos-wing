@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #ifdef _WIN32
 #include <windows.h>
+#elif defined(__EMSCRIPTEN__)
 #else
 #include <signal.h>
 #include <sys/mman.h>
@@ -12,12 +13,13 @@
 #endif
 
 static uint32_t free_head;
+uint32_t heap_high = HEAP_START; // 지금까지 내준 블록의 가장 높은 끝. 자체 검사가 견줄 범위로 쓴다.
 #define HDR 8u
 
 // 32비트 주소 전체를 예약하고 게스트 영역만 연다. 번역 코드가 접근마다 범위를 검사하지 않아도 잘못된 주소는 보호 페이지에서 멈춘다.
 #define GUEST_RESERVE 0x100010000ull
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 static struct sigaction old_segv, old_bus;
 
 static void on_fault(int sig, siginfo_t *si, void *uc) {
@@ -43,7 +45,11 @@ static void on_fault(int sig, siginfo_t *si, void *uc) {
 #endif
 
 void guest_mem_alloc(void) {
-#ifdef _WIN32
+#ifdef __EMSCRIPTEN__
+    // 보호 페이지가 없다. 인터프리터와 읽는 C는 접근마다 범위를 검사한다(thumbrt.h의 CK).
+    uint8_t *p = calloc(1, GUEST_MEM);
+    if (!p) { fprintf(stderr, "게스트 메모리 할당 실패\n"); exit(1); }
+#elif defined(_WIN32)
     uint8_t *p = VirtualAlloc(NULL, GUEST_RESERVE, MEM_RESERVE, PAGE_NOACCESS);
     if (!p || !VirtualAlloc(p + GUEST_LOW, GUEST_MEM - GUEST_LOW, MEM_COMMIT, PAGE_READWRITE)) { fprintf(stderr, "게스트 메모리 예약 실패\n"); exit(1); }
 #else
@@ -81,6 +87,7 @@ uint32_t heap_alloc(uint32_t size) {
                 need = sz;
             }
             if (prev) W32(prev + 4, follow); else free_head = follow;
+            if (p + need > heap_high) heap_high = p + need;
             W32(p, need);
             W32(p + 4, 0x4c4c4f43);
             memset(c->m + p + HDR, 0, need - HDR);

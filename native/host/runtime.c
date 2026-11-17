@@ -21,7 +21,11 @@ void guest_fault(cpu_t *c, uint32_t a) {
 }
 
 // 0x882f0 memset, 0x883a4 memcpy, 0x884dc 64비트 나눗셈의 C 대응. setjmp/longjmp는 게임 코드가 쓰지 않는다.
-static bool arm_helper(cpu_t *c, uint32_t a) {
+const uint32_t arm_helper_addrs[] = {0x1882f0, 0x1883a4, 0x1884dc, 0};
+// 인터프리터 빌드가 채운다(interp/interp.c). 비어 있으면 번역 코드의 fn_table을 쓴다.
+void (*guest_exec)(cpu_t *, uint32_t);
+
+bool arm_helper(cpu_t *c, uint32_t a) {
     uint32_t *r = c->r;
     switch (a) {
     case 0x1882f0: CK(r[0], r[2]); memset(c->m + r[0], (int)r[1], r[2]); return true;
@@ -46,6 +50,7 @@ void call_ind(cpu_t *c, uint32_t t) {
         return;
     }
     if (arm_helper(c, t & ~1u)) return;
+    if (guest_exec) { guest_exec(c, t); return; }
     if (!nfn) while (fn_table[nfn].addr) nfn++;
     uint32_t a = t & ~1u;
     const fn_entry_t *e = bsearch(&a, fn_table, nfn, sizeof(fn_entry_t), cmpf);
@@ -57,6 +62,8 @@ void call_ind(cpu_t *c, uint32_t t) {
     e->fn(c);
 }
 
+uint64_t guest_ticks; // 게스트 코드(와 그 안의 API) 실행에 쓴 시간. 종료 때 main.c가 보고한다.
+
 uint32_t guest_call(uint32_t addr, const uint32_t *args, int n) {
     cpu_t *c = &cpu;
     uint32_t saved_sp = c->SP, saved_lr = c->LR;
@@ -67,7 +74,10 @@ uint32_t guest_call(uint32_t addr, const uint32_t *args, int n) {
         else W32(c->SP + (i - 4) * 4, args[i]);
     }
     c->LR = 0xfffffffe;
+    static int depth;
+    uint64_t t0 = depth++ ? 0 : SDL_GetPerformanceCounter();
     call_ind(c, addr | 1);
+    if (!--depth) guest_ticks += SDL_GetPerformanceCounter() - t0;
     c->SP = saved_sp;
     c->LR = saved_lr;
     return c->r[0];
@@ -78,7 +88,12 @@ typedef struct { uint32_t timer, cb, a0, a1; uint64_t due, seq; bool defer; bool
 static pend_t pend[256];
 static uint64_t seq;
 
-uint64_t now_ms(void) { return SDL_GetTicks(); }
+// CHRONOS_VCLOCK: 대조용 가상 시계. 메인 루프가 기다릴 만큼 건너뛰고(vclock_skip) 타이머 콜백마다 1ms 흐른다. 실행 속도와 무관하게 같은 순서로 돈다.
+static uint64_t vnow;
+static int vclock = -1;
+bool vclock_on(void) { if (vclock < 0) vclock = getenv("CHRONOS_VCLOCK") != NULL; return vclock; }
+void vclock_skip(uint64_t ms) { vnow += ms; }
+uint64_t now_ms(void) { return vclock_on() ? vnow : SDL_GetTicks(); }
 
 void timer_unset(uint32_t timer) {
     for (int i = 0; i < 256; i++)
@@ -131,6 +146,7 @@ void timers_run(void) {
         uint32_t args[2] = {best->a0, best->a1}, cb = best->cb;
         best->used = false;
         guest_call(cb, args, 2);
+        if (vclock_on()) vnow++;
     }
 }
 

@@ -387,7 +387,12 @@ extern "C" bool ui_init(SDL_Window *win, SDL_Renderer *ren, const char *ui_dir, 
     Rml::SetRenderInterface(render_if);
     if (!Rml::Initialise()) return false;
     std::string dir = ui_dir;
+#ifdef __EMSCRIPTEN__
+    // 글꼴은 가져온 게임 데이터에서 만들어 저장소에 둔다(web/shell.html).
+    if (!Rml::LoadFontFace("/persist/ChronosGame.ttf", true)) return false;
+#else
     if (!Rml::LoadFontFace(dir + "/ChronosGame.ttf", true)) return false;
+#endif
     ctx = Rml::CreateContext("main", {640, 320});
     bind_model();
 #ifdef __ANDROID__
