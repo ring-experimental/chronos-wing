@@ -212,6 +212,8 @@ async function start() {
   const exits = ['exitFullscreen', 'webkitExitFullscreen'].filter(n => document[n]);
   for (const n of exits) document[n] = () => Promise.resolve();
   try { Module.callMain(args); } finally { for (const n of exits) delete document[n]; }
+  // SDL은 페이지를 채우는 창을 만들 때 캔버스가 아닌 것을 모두 숨긴 상자로 옮긴다. 게임 위에 떠야 하는 화면들을 다시 꺼내 놓는다.
+  for (const id of ['setup', 'ime', 'rotate', 'picker', 'ended']) document.body.appendChild($(id));
   setTimeout(focusGame, 0);
 }
 
