@@ -12,7 +12,8 @@ self.addEventListener('activate', e => e.waitUntil(
 
 async function networkFirst(request) {
   try {
-    const response = await fetch(request);
+    // 브라우저의 HTTP 캐시를 그대로 쓰면 새 페이지에 옛 wasm이 섞일 수 있다. 서버에 바뀌었는지 물어보고 받는다.
+    const response = await fetch(request.url, { cache: 'no-cache' });
     if (response.ok) (await caches.open(CACHE)).put(request, response.clone());
     return response;
   } catch (e) {
