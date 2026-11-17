@@ -66,10 +66,15 @@ bool game_shortcuts_bought(void) { return cpu.m && cpu.m[0x1b0e58 + 600]; }
 static int choose_width(bool windowed) {
     int w = width_arg;
 #ifdef __EMSCRIPTEN__
-    // 페이지 크기의 비율을 따른다. 세로로 든 화면은 원작 폭이다.
+    // 높이 320을 유지하고 폭은 페이지 비율을 따른다. 폭은 시작할 때 한 번 정해지므로, 터치 기기를 세로로 든 채 시작해도
+    // Android 빌드처럼 가로로 돌렸을 때의 비율(화면의 긴 변 / 짧은 변)로 잡는다. 세로로 둔 데스크톱 창만 원작 폭이다.
     if (!w) {
         int pw = EM_ASM_INT({ return window.innerWidth; }), ph = EM_ASM_INT({ return window.innerHeight; });
-        w = pw > ph && ph > 0 ? 320 * pw / ph : 240;
+        int lng = EM_ASM_INT({ return Math.max(screen.width, screen.height); }), shrt = EM_ASM_INT({ return Math.min(screen.width, screen.height); });
+        bool touch = EM_ASM_INT({ return navigator.maxTouchPoints > 0; });
+        if (pw > ph && ph > 0) w = 320 * pw / ph;
+        else if (touch && shrt > 0) w = 320 * lng / shrt;
+        else w = 240;
     }
 #endif
     if (!w && !windowed) {

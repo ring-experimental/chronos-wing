@@ -94,6 +94,7 @@ async function install(file) {
 
 function start() {
   $('setup').hidden = true;
+  document.body.classList.add('playing');
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
   const args = [PERSIST + '/game', '--save', PERSIST + '/save', '--soundfont', '/1mgm.sf2'];
   const extra = new URLSearchParams(location.search); // 시험용: ?touch=1 화면 패드, ?width=<폭>
