@@ -1,6 +1,7 @@
 {
   "name": "크로노스 윙",
   "short_name": "크로노스 윙",
+  "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "fullscreen",

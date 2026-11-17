@@ -46,7 +46,7 @@ make web       # build/web 폴더를 통째로 올린다. 의존성(SDL3, FreeTy
 make interp    # 같은 인터프리터의 맥 빌드(build/chronos-interp). interp/compare.sh로 번역 빌드와 대조한다
 ```
 
-웹 빌드에는 원본에서 나온 것이 없다. 번역 C 대신 Thumb 인터프리터(`interp/interp.c`)가 `client.bin`을 직접 실행하고, 게임 데이터와 글꼴, 소리 이벤트는 사용자가 페이지에서 고른 원본 파일(KTF 판 zip 또는 jar)로 브라우저가 만든다(`web/gamedata.js`). 데이터와 세이브는 브라우저 저장소(IndexedDB, `/persist`)에 있고 세이브 내보내기는 내려받기, 들여오기는 파일 고르기 화면이다. 서비스 워커(`web/sw.js`)는 앱 껍데기만 캐시하며 https나 localhost에서만 돈다. 새 빌드는 두 번째로 열 때 적용된다. 시험용 주소 인자는 `?touch=1`(화면 패드), `?width=<폭>`이다.
+웹 빌드에는 원본에서 나온 것이 없다. 번역 C 대신 Thumb 인터프리터(`interp/interp.c`)가 `client.bin`을 직접 실행하고, 게임 데이터와 글꼴, 소리 이벤트는 사용자가 페이지에서 고른 원본 파일(KTF 판 zip 또는 jar)로 브라우저가 만든다(`web/gamedata.js`). 데이터와 세이브는 브라우저 저장소(IndexedDB, `/persist`)에 있고 세이브 내보내기는 내려받기, 들여오기는 파일 고르기 화면이다. 서비스 워커(`web/sw.js`)는 앱 껍데기만 캐시하며(네트워크 우선) https나 localhost에서만 돈다. 터치 기기는 시작할 때 전체화면과 가로 고정을 요청하고, 앱으로 설치하면 넣은 원본의 아이콘이 쓰인다([docs/web.md](../docs/web.md)). 시험용 주소 인자는 `?touch=1`(화면 패드), `?width=<폭>`이다.
 
 인터프리터가 느린 함수는 `restored/`로 옮긴다(`blit.c`, `crypt.c`). `CHRONOS_SELFCHECK=1`(또는 `sweep`)로 실행하면 옮긴 함수와 원본을 호출마다 견준다(`restored/selfcheck.c`).
 

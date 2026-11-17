@@ -6,9 +6,11 @@
 <meta name="theme-color" content="#000000">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link id="manifest" rel="manifest" href="manifest.webmanifest">
+<link id="favicon" rel="icon" href="icon.svg" type="image/svg+xml">
+<link id="touch-icon" rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="크로노스 윙">
 <title>크로노스 윙</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; color: #e8e8e8; overflow: hidden; overscroll-behavior: none; touch-action: none;
@@ -28,6 +30,7 @@
   /* 게임은 가로 화면에 맞춰 넓게 그린다. 터치 기기를 세로로 들고 있으면 돌리라고 알린다. */
   #rotate { display: none; }
   @media (orientation: portrait) and (pointer: coarse) { body.playing #rotate { display: flex; } }
+  .tip { font-size: .85em; border-left: 3px solid #e9c46a; padding-left: .8em; margin-top: 1.2em; }
   .foot { font-size: .85em; margin-top: 2em; }
   .foot a { color: #7fb7d6; }
 </style>
@@ -41,7 +44,9 @@
     <div id="need" hidden>
       <p>이 페이지에는 게임이 들어 있지 않습니다. 가지고 있는 원본 파일(KTF 판 zip 또는 jar)을 고르면 이 기기에서 풀어 실행합니다. 파일은 어디로도 보내지 않고 이 브라우저의 저장소에만 둡니다.</p>
       <label class="file">원본 파일 고르기<input id="source" type="file" accept=".zip,.jar"></label>
+      <p id="install-tip" class="tip" hidden>앱으로 설치하려면 원본 zip을 먼저 넣으세요. 그러면 원본의 아이콘으로 설치됩니다.</p>
     </div>
+    <p id="ios-tip" class="tip" hidden>iPhone·iPad: 공유 버튼의 <b>홈 화면에 추가</b>로 설치하면 화면을 꽉 채우고, 오래 열지 않아도 Safari가 데이터를 지우지 않습니다. 설치한 앱의 저장소는 Safari와 따로이니 원본 파일과 세이브는 설치한 앱에서 넣으세요.</p>
     <div id="ready" hidden>
       <p>세이브는 이 브라우저에 저장됩니다. 브라우저 데이터를 지우면 함께 사라지니 타이틀의 캐릭터 관리 → 캐릭터 복구에서 파일로 내보내 두세요.</p>
       <button id="start">게임 시작</button>

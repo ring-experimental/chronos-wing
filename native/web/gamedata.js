@@ -48,8 +48,10 @@ async function sha256(bytes) {
 }
 
 // 원본 zip이면 안의 jar를 다시 푼다. 실행 이미지는 client.bin<BSS 크기>로 들어 있고 호스트는 client.bin으로 읽는다.
+// zip에는 단말기 메뉴용 아이콘(big.icon, PNG)이 jar 옆에 있다. 있으면 돌려주는 Map의 icon에 담는다(jar만 고르면 없다).
 async function extractGame(bytes) {
   let files = await unzip(bytes);
+  const icon = files.get('big.icon');
   const jar = [...files.keys()].find(n => n.toLowerCase().endsWith('.jar'));
   if (jar) files = await unzip(files.get(jar));
   const image = [...files.keys()].find(n => /^client\.bin\d+$/.test(n));
@@ -59,6 +61,7 @@ async function extractGame(bytes) {
   const game = new Map();
   for (const [name, data] of files) if (!name.startsWith('META-INF/') && name !== image) game.set(name, data);
   game.set('client.bin', files.get(image));
+  game.icon = icon || null;
   return game;
 }
 
@@ -244,6 +247,6 @@ async function buildEvents(game, wasmBytes) {
   return out;
 }
 
-root.CWGameData = { unzip, extractGame, buildFont, buildEvents };
+root.CWGameData = { unzip, extractGame, buildFont, buildEvents, sha256 };
 if (typeof module !== 'undefined') module.exports = root.CWGameData;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

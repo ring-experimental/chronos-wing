@@ -415,6 +415,9 @@ static void tick(void) {
             if (ui_event(&e)) continue;
             if (ime_event(&e)) continue;
             else if ((e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) && !e.key.repeat) {
+#ifdef __EMSCRIPTEN__
+                if (e.key.scancode == SDL_SCANCODE_F11) continue; // 전체화면은 페이지가 키 입력에서 바로 바꾼다(web/app.js)
+#endif
                 if (e.key.scancode == SDL_SCANCODE_F11 && e.type == SDL_EVENT_KEY_DOWN) {
                     windowed = !windowed;
                     SDL_SetWindowFullscreen(win, !windowed);

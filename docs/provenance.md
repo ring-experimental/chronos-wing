@@ -39,6 +39,7 @@ flowchart LR
 | `game.ev` | 게임 소리(SMAF)를 변환 | `native/build`, 브라우저 저장소 | 없음 | 없음 |
 | 런처 아이콘(Android) | 타이틀 화면에서 만듦 | `native/build/android` | 없음 | 없음 |
 | Ghidra 프로젝트, 디컴파일, 화면 캡처 | 분석 중간물 | `work/ghidra`, `work/decomp`, `work/shots` | 없음 | 없음 |
+| 설치 아이콘(웹) | 원본 zip의 `big.icon`을 브라우저가 키움 | 브라우저 저장소 | 없음 | 없음 |
 | 세이브 | 플레이 결과 | `work/saves`, 브라우저 저장소 | 없음 | 없음 |
 | `chronos.wasm` | 저장소의 소스만으로 빌드 | `native/build/web` | 없음(빌드 결과) | 있음 |
 | 화면 패드 그림 | `work/tools/mkskin.py`가 도형으로 그림 | `native/ui/*.png` | 있음 | 있음 |
