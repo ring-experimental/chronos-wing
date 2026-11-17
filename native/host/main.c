@@ -499,7 +499,8 @@ int main(int argc, char **argv) {
     SDL_CreateDirectory(save_dir);
 
 #ifdef __EMSCRIPTEN__
-    SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_FILL_DOCUMENT;
+    // 캔버스를 CSS 픽셀이 아니라 화면 픽셀로 만든다. 없으면 게임 화면을 작은 캔버스에 한 번 늘리고 브라우저가 또 늘려 도트가 고르지 않게 뭉개진다.
+    SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_FILL_DOCUMENT | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #else
     SDL_WindowFlags window_flags = windowed ? SDL_WINDOW_RESIZABLE : SDL_WINDOW_FULLSCREEN;
 #endif
