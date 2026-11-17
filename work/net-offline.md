@@ -1,5 +1,7 @@
 # 네트워크 기능 오프라인화
 
+> 이 저장소에는 게임 원본과 그 파생물이 없다. 이 문서에 나오는 원본 파일, `native/build`, `work/bin`·`work/decomp`·`work/ghidra`·`work/shots`·`work/saves`는 원본을 가진 사람의 작업 폴더에만 있다. 적힌 주소와 수치는 분석 기록이다. → [docs/provenance.md](../docs/provenance.md)
+
 작성 2026-11-01. 원본은 TCP 서버(`210.222.18.18`)에 접속하는 네트워크 모드가 있다. 타이틀 메뉴 `네트워크`로 들어가고, 싱글의 동료와 용병으로 방어진을 짜 다른 플레이어의 비공정을 공략한다(`tdf/HELP`). 서비스가 끝나 이 모드 전체가 막혀 있다.
 
 방식: `native/host/localnet.c`가 소켓 API를 받아 프로세스 안에서 응답한다. 게임의 UI와 처리 코드는 원본 그대로 돌고, 서버 역할만 C로 옮긴다. 기능별 처리기는 `native/host/localnet_<기능>.c`다. `캐시구입`(보우머)과 키냥냥 단축키는 `native/host/api.c`의 접속 처리에 이미 있어 여기서 다루지 않는다.

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """client.bin 재귀 하강 분석. 코드/리터럴/점프표/데이터 구역을 나눈다.
 
+입력(client.bin)은 저장소에 없고 출력(codemap.json)은 build/에만 둔다. 이 도구에는 원본 내용이 없다.
+
 주소는 파일 오프셋이다. Ghidra 주소 = 오프셋 + 0x100000, 이미지 기준 오프셋 = 파일 오프셋 - BASE.
 GCC Thumb PIC 코드라 sl = GOT 시작이고, 점프표는 sl 상대, 항목은 표 시작 상대다.
 후보는 시험 해석을 통과해야만 확정한다. 게임은 ARMv4T라 BL 외 4바이트 명령과 v5 이상 명령은 무효다.

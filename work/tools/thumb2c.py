@@ -3,6 +3,8 @@
 
 레지스터와 플래그는 함수 안에서 지역 변수로 두고 호출과 복귀 때만 cpu 구조체와 맞춘다. 메모리는 m(게스트 주소 + 베이스)로 접근한다.
 thumb2c.py <client.bin> <codemap.json> <out.c>
+
+입력(client.bin)은 저장소에 없고, 출력(tr.c)은 원본 코드를 옮긴 파생물이라 build/에만 둔다. 이 도구에는 원본 내용이 없다.
 """
 import json, re, struct, sys
 from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB

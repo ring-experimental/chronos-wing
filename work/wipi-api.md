@@ -1,5 +1,7 @@
 # 크로노스 윙 WIPI API 목록
 
+> 이 저장소에는 게임 원본과 그 파생물이 없다. 이 문서에 나오는 원본 파일, `native/build`, `work/bin`·`work/decomp`·`work/ghidra`·`work/shots`·`work/saves`는 원본을 가진 사람의 작업 폴더에만 있다. 적힌 주소와 수치는 분석 기록이다. → [docs/provenance.md](../docs/provenance.md)
+
 재현: `work/tools/apitrace.sh`(실행 기록) → `apiscan.py`(정적 호출 지점) → `apijoin.py`(표 작성). 이름은 WIE 소스(MIT) 기준이며, `?`는 WIE에 이름이 없는 슬롯이다.
 
 - 정적: 표 호출 1,211곳 중 1,101곳의 슬롯을 해석했다. 110곳은 해석하지 못했다(가상 함수와 콜백 포인터가 섞여 있음).

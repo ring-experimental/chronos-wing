@@ -1,5 +1,6 @@
 #!/bin/zsh
 # macOS 앱 묶음. 먼저 native에서 make를 돌린다. 결과: build/mac/ChronosWing.app (arm64, 임시 서명)
+# 묶음에는 원본에서 번역한 코드와 게임 데이터가 들어간다. 원본을 가진 사람이 쓰는 용도이며 저장소와 공개 배포에 올리지 않는다.
 # 실행 파일은 SDL_GetBasePath(묶음이면 Contents/Resources) 아래 game, ui, game.ev, 1mgm.sf2를 읽는다.
 # Homebrew 동적 라이브러리는 Contents/Frameworks로 옮기고 @rpath로 바꾼다.
 set -eu

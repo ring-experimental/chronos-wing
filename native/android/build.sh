@@ -1,6 +1,7 @@
 #!/bin/zsh
 # APK 빌드. Gradle 없이 NDK, build-tools로 만든다. 먼저 native에서 make를 돌려 build/tr.c와 게임 데이터를 준비한다.
 # 결과: build/android/chronos.apk (android/chronos.keystore 서명, arm64-v8a)
+# APK에는 원본에서 번역한 코드와 게임 데이터가 들어간다. 원본을 가진 사람이 제 기기에 쓰는 용도이며 저장소와 공개 배포에 올리지 않는다.
 set -eu
 HERE=${0:A:h}; N=$HERE:h; B=$N/build; O=$B/android
 SDK=${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}

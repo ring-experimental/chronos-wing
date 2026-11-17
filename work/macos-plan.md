@@ -1,5 +1,7 @@
 # 크로노스 윙: macOS 작업 계획
 
+> 이 저장소에는 게임 원본과 그 파생물이 없다. 이 문서에 나오는 원본 파일, `native/build`, `work/bin`·`work/decomp`·`work/ghidra`·`work/shots`·`work/saves`는 원본을 가진 사람의 작업 폴더에만 있다. 적힌 주소와 수치는 분석 기록이다. → [docs/provenance.md](../docs/provenance.md)
+
 작성일 2026-10-30, 방향 변경 2026-10-31, 1~7번 완료, 9번 빌드 완료 2026-10-31. 다음 세션은 이 문서의 "다음 세션 순서"부터 시작한다.
 
 ## 결론

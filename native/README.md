@@ -1,5 +1,22 @@
 # 크로노스 윙 네이티브 빌드
 
+> 이 저장소에는 게임 원본과 그 파생물이 없다. 번역 빌드(`make`, `windows`, `android`, `mac`)는 원본 `크로노스윙.zip`을 가진 사람이 저장소 루트에 두고 돌리며, 결과물(`build/`)에는 원본이 들어가므로 올리지 않는다. 웹 빌드(`make web`)는 원본 없이 빌드된다. → [docs/provenance.md](../docs/provenance.md)
+
+```mermaid
+flowchart LR
+    zip[("크로노스윙.zip<br/>저장소에 없음")]
+    src["host/ restored/ ui/"]
+    zip --> game["build/game<br/>데이터"] & tr["build/tr.c<br/>번역 C"] & ev["build/game.ev"] & ttf["build/ui/ChronosGame.ttf"]
+    src --> tb["번역 빌드<br/>make · windows · android · mac"]
+    tr --> tb
+    src --> itp["make interp<br/>build/chronos-interp"]
+    src --> web["make web<br/>build/web"]
+    game -.->|"실행할 때 읽음"| tb & itp
+    web -.->|"브라우저에서 사용자가 원본을 고름"| run["실행"]
+```
+
+구조는 [docs/architecture.md](../docs/architecture.md), 웹은 [docs/web.md](../docs/web.md), 검증은 [docs/verification.md](../docs/verification.md)에 있다.
+
 WIE와 ARM 에뮬레이터 없이 도는 SDL3 빌드다. 게임 코드는 `client.bin`을 기계 번역한 C이고, 수정한 함수만 `restored/`의 읽는 C로 교체한다(목록은 `restored/list.txt`). WIPI API는 `host/`에서 직접 구현한다.
 
 ```bash
@@ -20,6 +37,18 @@ make mac       # build/mac/ChronosWing.app(arm64, 임시 서명)과 옮기기용
 ```
 
 Android는 첫 실행 때 APK 안의 데이터를 푼다. 뒤로 키는 CLEAR다.
+
+## 웹
+
+```bash
+brew install emscripten
+make web       # build/web 폴더를 통째로 올린다. 의존성(SDL3, FreeType, RmlUi)은 처음에 deps.sh web이 만든다
+make interp    # 같은 인터프리터의 맥 빌드(build/chronos-interp). interp/compare.sh로 번역 빌드와 대조한다
+```
+
+웹 빌드에는 원본에서 나온 것이 없다. 번역 C 대신 Thumb 인터프리터(`interp/interp.c`)가 `client.bin`을 직접 실행하고, 게임 데이터와 글꼴, 소리 이벤트는 사용자가 페이지에서 고른 원본 파일(KTF 판 zip 또는 jar)로 브라우저가 만든다(`web/gamedata.js`). 데이터와 세이브는 브라우저 저장소(IndexedDB, `/persist`)에 있고 세이브 내보내기는 내려받기, 들여오기는 파일 고르기 화면이다. 서비스 워커(`web/sw.js`)는 앱 껍데기만 캐시하며 https나 localhost에서만 돈다. 새 빌드는 두 번째로 열 때 적용된다. 시험용 주소 인자는 `?touch=1`(화면 패드), `?width=<폭>`이다.
+
+인터프리터가 느린 함수는 `restored/`로 옮긴다(`blit.c`, `crypt.c`). `CHRONOS_SELFCHECK=1`(또는 `sweep`)로 실행하면 옮긴 함수와 원본을 호출마다 견준다(`restored/selfcheck.c`).
 
 ## UI
 

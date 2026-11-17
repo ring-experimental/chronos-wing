@@ -1,5 +1,7 @@
 # 턴제 모드 계획
 
+> 이 저장소에는 게임 원본과 그 파생물이 없다. 이 문서에 나오는 원본 파일, `native/build`, `work/bin`·`work/decomp`·`work/ghidra`·`work/shots`·`work/saves`는 원본을 가진 사람의 작업 폴더에만 있다. 적힌 주소와 수치는 분석 기록이다. → [docs/provenance.md](../docs/provenance.md)
+
 작성 2026-11-08. 워크트리 `chronos-wing-wt/turn`, 브랜치 `turn/base`(main d6ad921 기준).
 
 ## 사용자 결정

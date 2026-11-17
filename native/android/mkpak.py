@@ -1,4 +1,5 @@
 # mkpak.py <빌드 폴더> <출력> <ui 폴더>: 게임 데이터, game.ev, 사운드폰트, UI를 앱이 첫 실행 때 푸는 단일 파일로 묶는다.
+# 묶음에는 원본 게임 데이터가 들어간다. build/에만 두며 저장소와 공개 배포에 올리지 않는다.
 import os, struct, sys
 build, out, ui = sys.argv[1], sys.argv[2], sys.argv[3]
 items = [('game.ev', f'{build}/game.ev'), ('1mgm.sf2', f'{build}/1mgm.sf2')]
