@@ -199,6 +199,39 @@ static void set_area(void) {
 
 bool ime_active(void) { return cpu.m[FIELD_OPEN] != 0; }
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+// 웹: SDL은 폰의 화면 키보드를 띄우지 못하고 한글 조합도 주지 않는다. 페이지가 진짜 입력 칸을 띄워 브라우저의 입력기를 쓰고(web/app.js),
+// 그 칸의 글 전체를 바뀔 때마다 넘겨 게임 칸을 같게 맞춘다. 조합 중인 글자도 그 안에 들어 있다.
+// 게임 칸에 들어간 글자 수를 돌려준다. 페이지는 넘친 글자를 제 칸에서 지운다.
+EMSCRIPTEN_KEEPALIVE int web_ime_set(const char *utf8) {
+    cpu_t *c = &cpu;
+    if (!ime_active()) return 0;
+    W16_(c, FIELD + F_POS, 0);
+    c->m[FIELD + F_TAIL] = 0;
+    composing = false;
+    field_show("", 0);
+    int kept = 0;
+    for (uint32_t u; (u = next_char(&utf8)) != 0;) {
+        char o[2];
+        int n = to_euckr(u, o);
+        if (!n || !field_commit(o, n)) break;
+        kept++;
+    }
+    return kept;
+}
+
+// 지금 게임 칸에 있는 글(EUC-KR). 칸이 열릴 때 페이지가 읽어 제 칸의 처음 값으로 쓴다.
+EMSCRIPTEN_KEEPALIVE const char *web_ime_current(void) { return field_text(); }
+
+// 페이지의 칸에서 Enter(완료)를 누르면 게임에 OK를 보낸다.
+EMSCRIPTEN_KEEPALIVE void web_ime_ok(void) {
+    if (!ime_active()) return;
+    host_key(2, KEY_OK);
+    host_key(3, KEY_OK);
+}
+#endif
+
 // 칸이 열리고 닫힐 때 플랫폼 입력기(Android는 화면 키보드)를 켜고 끈다.
 void ime_poll(void) {
     bool on = ime_active();
@@ -206,6 +239,10 @@ void ime_poll(void) {
     text_on = on;
     composing = false;
     dropped = 0;
+#ifdef __EMSCRIPTEN__
+    EM_ASM({ Module.imeShow($0); }, on);
+    return;
+#endif
     SDL_Window *win = host_window();
     if (on) { set_area(); SDL_StartTextInput(win); }
     else SDL_StopTextInput(win);

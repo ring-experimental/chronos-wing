@@ -30,6 +30,11 @@
   /* 게임은 가로 화면에 맞춰 넓게 그린다. 터치 기기를 세로로 들고 있으면 돌리라고 알린다. */
   #rotate { display: none; }
   @media (orientation: portrait) and (pointer: coarse) { body.playing #rotate { display: flex; } }
+  /* 게임의 글자 입력 칸이 열려 있는 동안 화면 위쪽에 뜨는 진짜 입력 칸. 화면 키보드가 아래를 가려도 보인다. */
+  #ime { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; z-index: 5; -webkit-user-select: text; user-select: text; }
+  #ime[hidden] { display: none; }
+  #ime input { font: inherit; width: min(60vw, 18em); padding: .5em .7em; border: 2px solid #e9c46a; border-radius: 8px; background: #0b0d12; color: #fff; touch-action: auto; }
+  #ime button { padding: .5em 1em; }
   .tip { font-size: .85em; border-left: 3px solid #e9c46a; padding-left: .8em; margin-top: 1.2em; }
   .foot { font-size: .85em; margin-top: 2em; }
   .foot a { color: #7fb7d6; }
@@ -55,6 +60,11 @@
     <p id="status">불러오는 중…</p>
     <p class="foot">이 페이지와 <a href="https://github.com/ring-experimental/chronos-wing" target="_blank" rel="noopener">소스 저장소</a>에는 게임 원본이 없습니다.</p>
   </div>
+</div>
+
+<div id="ime" hidden>
+  <input id="ime-text" type="text" inputmode="text" enterkeyhint="done" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="여기를 눌러 입력">
+  <button id="ime-done">완료</button>
 </div>
 
 <div id="rotate" class="screen over">

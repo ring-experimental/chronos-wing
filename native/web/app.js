@@ -212,7 +212,42 @@ async function start() {
   const exits = ['exitFullscreen', 'webkitExitFullscreen'].filter(n => document[n]);
   for (const n of exits) document[n] = () => Promise.resolve();
   try { Module.callMain(args); } finally { for (const n of exits) delete document[n]; }
+  setTimeout(focusGame, 0);
 }
+
+// ---- 글자 입력 ----
+// 게임의 입력 칸(닉네임, 편지, 검색)이 열리면 화면 위쪽에 진짜 입력 칸을 띄워 브라우저의 입력기(한글 조합, 폰의 화면 키보드)를 쓴다.
+// 칸의 글 전체를 바뀔 때마다 게임에 넘기고(host/ime.c의 web_ime_set), 게임이 받지 못한 글자는 조합이 끝났을 때 칸에서 지운다.
+// 폰은 사용자가 칸을 눌러야 화면 키보드가 뜬다. Enter나 완료를 누르면 게임에 OK를 보낸다.
+const imeBox = $('ime-text');
+let imeComposing = false;
+function imeSync() {
+  const text = imeBox.value, kept = Module.ccall('web_ime_set', 'number', ['string'], [text]);
+  if (!imeComposing && kept < [...text].length) imeBox.value = [...text].slice(0, kept).join('');
+}
+function imeDone() {
+  imeSync();
+  Module.ccall('web_ime_ok', null, [], []);
+}
+Module.imeShow = on => {
+  $('ime').hidden = !on;
+  if (!on) { imeBox.blur(); $('canvas').focus(); return; }
+  const at = Module.ccall('web_ime_current', 'number', [], []), heap = Module.HEAPU8;
+  let end = at;
+  while (heap[end]) end++;
+  imeBox.value = new TextDecoder('euc-kr').decode(heap.slice(at, end));
+  imeBox.focus();
+};
+// 게임은 캔버스에 포커스가 있을 때만 키를 받는다. 입력 칸을 쓰는 중이 아니면 포커스를 캔버스로 돌려 둔다.
+function focusGame() {
+  if (playing && $('ime').hidden && $('picker').hidden && document.activeElement !== $('canvas')) $('canvas').focus({ preventScroll: true });
+}
+for (const type of ['pointerdown', 'keydown', 'focusout']) addEventListener(type, () => setTimeout(focusGame, 0), true);
+imeBox.addEventListener('compositionstart', () => { imeComposing = true; });
+imeBox.addEventListener('compositionend', () => { imeComposing = false; imeSync(); });
+imeBox.addEventListener('input', imeSync);
+imeBox.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); imeDone(); } });
+$('ime-done').addEventListener('click', imeDone);
 
 // 게임이 부른다(host/savefile.c).
 Module.pickSave = () => { $('savefile').value = ''; $('picker').hidden = false; };

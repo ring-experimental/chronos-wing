@@ -483,6 +483,10 @@ int main(int argc, char **argv) {
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
     SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
 #endif
+#ifdef __EMSCRIPTEN__
+    // 키는 캔버스에 포커스가 있을 때만 받는다. 페이지의 글자 입력 칸에 치는 키가 게임으로 새지 않게 한다.
+    SDL_SetHint(SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT, "#canvas");
+#endif
     SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "1");
     SDL_SetHint(SDL_HINT_IME_IMPLEMENTED_UI, "composition");
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) { SDL_Log("SDL_Init: %s", SDL_GetError()); return 1; }

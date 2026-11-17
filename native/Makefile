@@ -144,7 +144,7 @@ $(WEB)/chronos.js: $(WEBOBJ) $(wildcard ui/*) third_party/1mgm.sf2
 	mkdir -p $(WEB)
 	em++ $(WEBOBJ) -O2 -L$(WEBDEP)/lib -lrmlui -lfreetype -lSDL3 -lidbfs.js \
 		-sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=134217728 -sSTACK_SIZE=1048576 \
-		-sEXPORTED_FUNCTIONS=_main,_web_save_picked -sEXPORTED_RUNTIME_METHODS=callMain,ccall,FS,IDBFS,UTF8ToString \
+		-sEXPORTED_FUNCTIONS=_main,_web_save_picked,_web_ime_set,_web_ime_current,_web_ime_ok -sEXPORTED_RUNTIME_METHODS=callMain,ccall,FS,IDBFS,UTF8ToString,HEAPU8 \
 		--preload-file ui@/ui --preload-file third_party/1mgm.sf2@/1mgm.sf2 -o $@
 
 $(SMAFWASM): $(ROOT)/work/tools/smaf2ev/src/lib.rs $(ROOT)/work/tools/smaf2ev/Cargo.toml
