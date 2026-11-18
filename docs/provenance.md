@@ -31,7 +31,7 @@ flowchart LR
 
 | 산출물 | 어디서 나오나 | 어디에 있나 | 저장소 | 웹 배포 |
 |---|---|---|---|---|
-| `크로노스윙.zip`, `010100D2.jar` | 사용자가 가진 원본 | 저장소 루트(개인 작업 폴더) | 없음 | 없음 |
+| 원본 zip, 그 안의 `010100D2.jar` | 사용자가 가진 원본 | 사용자가 정한 곳(`make ZIP=<경로>`) | 없음 | 없음 |
 | `client.bin`, 게임 데이터 폴더 | 원본을 푼 것 | `native/build/game`, 브라우저 저장소 | 없음 | 없음 |
 | `tr.c` | `thumb2c.py`가 `client.bin`을 번역 | `native/build` | 없음 | 없음 |
 | `codemap.json` | `codemap.py`의 분석 결과 | `native/build` | 없음 | 없음 |

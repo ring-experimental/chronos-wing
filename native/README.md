@@ -1,6 +1,6 @@
 # 크로노스 윙 네이티브 빌드
 
-> 이 저장소에는 게임 원본과 그 파생물이 없다. 번역 빌드(`make`, `windows`, `android`, `mac`)는 원본 `크로노스윙.zip`을 가진 사람이 저장소 루트에 두고 돌리며, 결과물(`build/`)에는 원본이 들어가므로 올리지 않는다. 웹 빌드(`make web`)는 원본 없이 빌드된다. → [docs/provenance.md](../docs/provenance.md)
+> 이 저장소에는 게임 원본과 그 파생물이 없다. 번역 빌드(`make`, `windows`, `android`, `mac`)는 원본 zip을 가진 사람이 `make ZIP=<경로>`로 넘겨 돌리며, 결과물(`build/`)에는 원본이 들어가므로 올리지 않는다. 웹 빌드(`make web`)는 원본 없이 빌드된다. → [docs/provenance.md](../docs/provenance.md)
 
 ```mermaid
 flowchart LR
@@ -20,7 +20,7 @@ flowchart LR
 WIE와 ARM 에뮬레이터 없이 도는 SDL3 빌드다. 게임 코드는 `client.bin`을 기계 번역한 C이고, 수정한 함수만 `restored/`의 읽는 C로 교체한다(목록은 `restored/list.txt`). WIPI API는 `host/`에서 직접 구현한다.
 
 ```bash
-make -j8                                   # 저장소 루트의 크로노스윙.zip이 필요하다
+make -j8 ZIP=<원본 zip 경로>               # 처음 한 번. build/game에 풀린 뒤에는 make -j8만으로 된다
 build/chronos build/game                   # 전체화면(폭은 모니터 비율, 240~640). --windowed, --width <폭>, --save <폴더>, F11 전환
 ```
 
@@ -31,7 +31,7 @@ build/chronos build/game                   # 전체화면(폭은 모니터 비�
 | 파이썬 도구(capstone, fonttools, pillow) | 저장소 루트 `pyproject.toml`, `uv.lock` | `make PY=<파이썬>` |
 | FreeType, RmlUi, SDL3(web, android, windows) | `deps.sh`(판과 sha256). 없으면 받아 `build/deps`에 둔다 | |
 | SDL3(맥) | 설치된 것. pkg-config, 없으면 `brew --prefix` | `make SDL_CFLAGS=... SDL_LIBS=...` |
-| 원본 zip | 저장소 루트의 `크로노스윙.zip` | `make ZIP=<경로>` |
+| 원본 zip | 기본값 없음. 이름과 위치는 자유 | `make ZIP=<경로>` |
 | Android SDK, NDK, JDK | NDK 27.2, build-tools 35, JDK 21 | `ANDROID_HOME`, `ANDROID_NDK_HOME`, `JAVA_HOME` |
 
 키: 방향키, Space/Enter=OK, Shift 좌/우=소프트키, Backspace=CLEAR, 123/QWE/ASD/ZXC=숫자 키패드. 입력 칸(닉네임, 편지, 검색)이 열리면 키보드는 글자 입력이 되고 OS 입력기로 한글을 친다. 방향키, Enter, Backspace만 게임으로 간다. Android는 화면 키보드가 뜬다.
