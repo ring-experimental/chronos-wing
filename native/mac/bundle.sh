@@ -26,8 +26,9 @@ if [[ -f $ICON ]]; then
   iconutil -c icns $S -o $C/Resources/chronos.icns
 fi
 
-# /opt/homebrew 의존성을 따라가며 복사한다.
-deps() { otool -L $1 | tail -n +2 | awk '{print $1}' | grep '^/opt/homebrew/' || true; }
+# Homebrew 접두사(다른 곳이면 BREW_PREFIX) 아래의 의존성을 따라가며 복사한다.
+PFX=${BREW_PREFIX:-$(brew --prefix)}
+deps() { otool -L $1 | tail -n +2 | awk '{print $1}' | grep "^$PFX/" || true; }
 # @rpath, @loader_path로 적힌 것(brotlidec → brotlicommon)은 그 라이브러리가 있던 폴더에서 찾는다.
 rdeps() {
   local d=${2:h}
@@ -56,7 +57,7 @@ for f in $C/Frameworks/*.dylib; do
 done
 # brotli처럼 @loader_path로 서로를 찾는 라이브러리도 Frameworks 안에서 해결되는지 본다.
 for f in $C/MacOS/chronos $C/Frameworks/*.dylib; do
-  if otool -L $f | tail -n +2 | awk '{print $1}' | grep -q '^/opt/homebrew/'; then echo "남은 Homebrew 경로: $f" >&2; exit 1; fi
+  if otool -L $f | tail -n +2 | awk '{print $1}' | grep -q "^$PFX/"; then echo "남은 Homebrew 경로: $f" >&2; exit 1; fi
 done
 codesign --force --deep --sign - $APP
 codesign --verify --deep --strict $APP

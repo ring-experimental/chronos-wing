@@ -2,9 +2,12 @@
 # 이 저장소에는 게임 원본이 없다. 원본(크로노스윙.zip)은 가진 사람이 저장소 루트에 직접 두며 .gitignore가 막는다.
 # - all, windows, android, mac: 그 zip에서 코드와 데이터를 꺼내 쓴다. build/의 결과물은 원본 파생물이라 올리지 않는다.
 # - interp_gen, web: zip 없이 빌드된다. 웹 빌드는 실행할 때 사용자가 고른 원본 파일을 브라우저에서 읽는다.
-# 전제: work/tools의 파이썬 도구(capstone).
+# 이 기계에만 맞는 경로는 적지 않는다. 도구는 PATH에서 찾고, 다른 곳에 있으면 make 변수로 넘긴다(PY, CARGO, SDL_CFLAGS, SDL_LIBS).
+# 의존성의 판은 두 곳에 적혀 있다: 파이썬 도구는 저장소 루트의 pyproject.toml과 uv.lock, C/C++ 라이브러리는 deps.sh.
 ROOT := $(abspath ..)
-PY := $(HOME)/private/reverse/tools/venv/bin/python
+# 파이썬 도구(capstone, fonttools)는 uv가 uv.lock대로 맞춘 환경에서 돌린다.
+PY ?= uv run --project $(ROOT) python
+CARGO ?= cargo
 ZIP := $(ROOT)/크로노스윙.zip
 B := build
 GAME := $(B)/game
@@ -19,8 +22,14 @@ RESTSRC := $(wildcard restored/*.c)
 RESTOBJ := $(RESTSRC:restored/%.c=$(B)/r_%.o)
 # 디버깅: make TRFLAGS=-DTRACE_PC 면 접근마다 범위를 검사하고 pc를 남긴다.
 TRFLAGS ?=
-CFLAGS := -O2 -g -w -std=gnu11 -Ihost -I/opt/homebrew/include
-LDFLAGS := -L/opt/homebrew/lib -lSDL3
+# 맥 빌드의 SDL3는 설치된 것을 쓴다. pkg-config가 알면 그대로, 모르면 Homebrew 접두사에서 찾는다.
+BREW := $(shell brew --prefix 2>/dev/null)
+SDL_CFLAGS ?= $(shell pkg-config --cflags sdl3 2>/dev/null || echo $(if $(BREW),-I$(BREW)/include))
+SDL_LIBS ?= $(shell pkg-config --libs sdl3 2>/dev/null || echo $(if $(BREW),-L$(BREW)/lib) -lSDL3)
+SDL_CFLAGS := $(SDL_CFLAGS)
+SDL_LIBS := $(SDL_LIBS)
+CFLAGS := -O2 -g -w -std=gnu11 -Ihost $(SDL_CFLAGS)
+LDFLAGS := $(SDL_LIBS)
 
 .PHONY: all windows android mac interp web
 all: $(B)/chronos $(GAME)/client.bin $(B)/game.ev $(B)/1mgm.sf2 $(B)/ui
@@ -70,7 +79,7 @@ $(call RML,mac)/lib/librmlui.a:
 	./deps.sh mac
 
 $(B)/%.o: host/%.cpp $(UIDEPS) $(call RML,mac)/lib/librmlui.a
-	c++ -O2 -g -std=c++17 -DRMLUI_STATIC_LIB -Ihost -I/opt/homebrew/include -I$(call RML,mac)/include -c $< -o $@
+	c++ -O2 -g -std=c++17 -DRMLUI_STATIC_LIB -Ihost $(SDL_CFLAGS) -I$(call RML,mac)/include -c $< -o $@
 
 # UI 폰트는 게임 비트맵 폰트에서 만든다.
 $(B)/ui: $(wildcard ui/*) $(ROOT)/work/tools/hnf2ttf.py $(GAME)/client.bin
@@ -80,9 +89,9 @@ $(B)/ui: $(wildcard ui/*) $(ROOT)/work/tools/hnf2ttf.py $(GAME)/client.bin
 
 # MMF를 이벤트로 바꾸는 도구는 빌드 때만 쓴다(smaf-player, MIT). 결과만 실행 파일 옆에 둔다.
 $(B)/game.ev: $(GAME)/client.bin
-	PATH=/opt/homebrew/opt/rustup/bin:$$PATH CARGO_TARGET_DIR=$(abspath $(B))/smaf2ev cargo run --release --manifest-path $(ROOT)/work/tools/smaf2ev/Cargo.toml -- $(abspath $(GAME))/snd $(abspath $@) > $(B)/game.ev.txt
+	CARGO_TARGET_DIR=$(abspath $(B))/smaf2ev $(CARGO) run --release --manifest-path $(ROOT)/work/tools/smaf2ev/Cargo.toml -- $(abspath $(GAME))/snd $(abspath $@) > $(B)/game.ev.txt
 
-# Windows 교차 빌드(mingw-w64). SDL3 개발 패키지는 build/deps/mingw에 받아 둔다. 결과는 build/win 폴더 통째로 옮긴다.
+# Windows 교차 빌드(mingw-w64). SDL3 개발 패키지는 deps.sh가 build/deps/mingw에 받는다. 결과는 build/win 폴더 통째로 옮긴다.
 WIN := $(B)/win
 WCC := x86_64-w64-mingw32-gcc
 WSDL := $(B)/deps/mingw/x86_64-w64-mingw32
@@ -148,7 +157,7 @@ $(WEB)/chronos.js: $(WEBOBJ) $(wildcard ui/*) third_party/1mgm.sf2
 		--preload-file ui@/ui --preload-file third_party/1mgm.sf2@/1mgm.sf2 -o $@
 
 $(SMAFWASM): $(ROOT)/work/tools/smaf2ev/src/lib.rs $(ROOT)/work/tools/smaf2ev/Cargo.toml
-	PATH=/opt/homebrew/opt/rustup/bin:$$PATH CARGO_TARGET_DIR=$(abspath $(B))/smaf2ev cargo build --release --lib --target wasm32-unknown-unknown --manifest-path $(ROOT)/work/tools/smaf2ev/Cargo.toml
+	CARGO_TARGET_DIR=$(abspath $(B))/smaf2ev $(CARGO) build --release --lib --target wasm32-unknown-unknown --manifest-path $(ROOT)/work/tools/smaf2ev/Cargo.toml
 
 $(WEBDEP)/lib/librmlui.a:
 	./deps.sh web

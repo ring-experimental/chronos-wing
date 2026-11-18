@@ -24,11 +24,20 @@ make -j8                                   # 저장소 루트의 크로노스윙
 build/chronos build/game                   # 전체화면(폭은 모니터 비율, 240~640). --windowed, --width <폭>, --save <폴더>, F11 전환
 ```
 
+필요한 도구(맥 기준): `brew install sdl3 cmake ninja uv`와 Rust(`cargo`). 이 기계에만 맞는 경로는 빌드 파일에 적지 않는다. 도구는 PATH에서 찾고, 다른 곳에 있으면 변수로 넘긴다.
+
+| 무엇 | 판이 적힌 곳 | 다른 경로를 쓸 때 |
+|---|---|---|
+| 파이썬 도구(capstone, fonttools, pillow) | 저장소 루트 `pyproject.toml`, `uv.lock` | `make PY=<파이썬>` |
+| FreeType, RmlUi, SDL3(web, android, windows) | `deps.sh`(판과 sha256). 없으면 받아 `build/deps`에 둔다 | |
+| SDL3(맥) | 설치된 것. pkg-config, 없으면 `brew --prefix` | `make SDL_CFLAGS=... SDL_LIBS=...` |
+| Android SDK, NDK, JDK | NDK 27.2, build-tools 35, JDK 21 | `ANDROID_HOME`, `ANDROID_NDK_HOME`, `JAVA_HOME` |
+
 키: 방향키, Space/Enter=OK, Shift 좌/우=소프트키, Backspace=CLEAR, 123/QWE/ASD/ZXC=숫자 키패드. 입력 칸(닉네임, 편지, 검색)이 열리면 키보드는 글자 입력이 되고 OS 입력기로 한글을 친다. 방향키, Enter, Backspace만 게임으로 간다. Android는 화면 키보드가 뜬다.
 
 ## Windows, Android
 
-SDL3 패키지를 `build/deps`에 받아 둔다(`SDL3-devel-<버전>-mingw.tar.gz`를 `mingw/`, `SDL3-<버전>.tar.gz`를 `src/`에 한 단계 벗겨 푼다).
+SDL3 패키지는 `deps.sh`가 `build/deps`에 받는다(Windows는 mingw 개발 패키지를 `mingw/`, Android는 소스를 `src/`).
 
 ```bash
 make windows   # build/win 폴더 통째로 옮겨 chronos.exe 실행. 실행 파일 옆 game 폴더를 쓴다

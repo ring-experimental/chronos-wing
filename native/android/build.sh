@@ -4,10 +4,14 @@
 # APK에는 원본에서 번역한 코드와 게임 데이터가 들어간다. 원본을 가진 사람이 제 기기에 쓰는 용도이며 저장소와 공개 배포에 올리지 않는다.
 set -eu
 HERE=${0:A:h}; N=$HERE:h; B=$N/build; O=$B/android
-SDK=${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}
-NDK=$SDK/ndk/27.2.12479018; BT=$SDK/build-tools/35.0.0; JAR=$SDK/platforms/android-35/android.jar
-JDK=/opt/homebrew/opt/openjdk@21/bin; export PATH=$JDK:$PATH
+# Android SDK는 ANDROID_HOME, NDK는 ANDROID_NDK_HOME, JDK는 JAVA_HOME으로 넘긴다. 없으면 Homebrew에 깐 것을 본다.
+BREW=$(brew --prefix 2>/dev/null || true)
+SDK=${ANDROID_HOME:-$BREW/share/android-commandlinetools}
+NDK=${ANDROID_NDK_HOME:-$SDK/ndk/27.2.12479018}; BT=$SDK/build-tools/35.0.0; JAR=$SDK/platforms/android-35/android.jar
+JDK=${JAVA_HOME:-$BREW/opt/openjdk@21}/bin; export PATH=$JDK:$PATH
 SRC=$B/deps/src; ABI=arm64-v8a; API=24
+# 파이썬 도구(pillow)는 저장소 루트의 uv.lock대로 맞춘 환경에서 돌린다.
+PY=${PY:-uv run --project $N:h python}
 mkdir -p $O/lib/lib/$ABI $O/java $O/assets
 
 # SDL3. 16KB 페이지 기기에서도 올라가도록 세그먼트를 16KB로 정렬한다.
@@ -19,7 +23,7 @@ fi
 cp $O/sdl16k/libSDL3.so $O/lib/lib/$ABI/
 
 # 게임
-CC=$NDK/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android$API-clang
+TC=($NDK/toolchains/llvm/prebuilt/*(/)); CC=$TC[1]/bin/aarch64-linux-android$API-clang
 INC=(-Ihost -I$SRC/include)
 cd $N
 OBJS=()
@@ -39,10 +43,10 @@ wait
 $CC++ -shared -static-libstdc++ -Wl,-z,max-page-size=16384 $OBJS -L$O/lib/lib/$ABI -L$RML/lib -lrmlui -lfreetype -lSDL3 -lm -landroid -llog -o $O/lib/lib/$ABI/libmain.so
 
 # 자바와 패키징
-python3 $HERE/mkpak.py $B $O/assets/game.pak $B/ui
+$=PY $HERE/mkpak.py $B $O/assets/game.pak $B/ui
 # SDL의 Android 파일 창은 기본 이름을 받지 않아 저장 창에만 날짜 이름을 넣는다.
 JSRC=$O/java-src; rm -rf $JSRC; mkdir -p $JSRC; cp $SRC/android-project/app/src/main/java/org/libsdl/app/*.java $JSRC/
-python3 $HERE/patch_activity.py $JSRC/SDLActivity.java
+$=PY $HERE/patch_activity.py $JSRC/SDLActivity.java
 $JDK/javac -nowarn -source 8 -target 8 -cp $JAR -d $O/java $JSRC/*.java 2>/dev/null
 $BT/d8 --release --lib $JAR --min-api $API --output $O $O/java/org/libsdl/app/*.class
 # CHRONOS_DEBUGGABLE=1: run-as로 세이브에 접근할 수 있는 진단 빌드.
@@ -51,11 +55,11 @@ if [[ ! -f $O/res/mipmap-anydpi-v26/ic_launcher.xml ]]; then
   F=$O/icon-frames; rm -rf $F $O/res; mkdir -p $F/save
   print '340 quit' > $F/script.txt
   CHRONOS_FRAMELOG=$F CHRONOS_SCRIPT=$F/script.txt $B/chronos --windowed --save $F/save >/dev/null 2>&1
-  python3 $HERE/mkicon.py $F/$(awk '$1==339{print $2}' $F/log.txt).raw $O/res
+  $=PY $HERE/mkicon.py $F/$(awk '$1==339{print $2}' $F/log.txt).raw $O/res
 fi
 $BT/aapt2 compile --dir $O/res -o $O/res.zip
 $BT/aapt2 link ${CHRONOS_DEBUGGABLE:+--debug-mode} -o $O/base.apk -I $JAR --manifest $HERE/AndroidManifest.xml -A $O/assets -R $O/res.zip --auto-add-overlay
-python3 $HERE/patch_manifest.py $O/base.apk $BT/aapt2
+$=PY $HERE/patch_manifest.py $O/base.apk $BT/aapt2
 cd $O
 zip -q -j base.apk classes.dex
 (cd lib && zip -q -r ../base.apk lib)

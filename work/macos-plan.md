@@ -42,12 +42,12 @@
 확인하지 못한 것:
 - **타이틀 화면.** 창 캡처(터미널 화면 기록 권한 부여 후) 결과, 약 1분 동안 파란 하늘과 움직이는 구름만 보이고 로고·글자·메뉴는 없었다. 입력을 기다리는 장면인지 로고·글자 그리기가 빠진 것인지 미확인. 다음 세션 2번에서 키를 눌러 가장 먼저 확인한다. 창은 240×320 등배 크기라 확대가 없다.
 - **입력과 진행.** 키를 넣어 보지 않았다. 새 게임, 전투, 저장, 불러오기 모두 미확인.
-- **소리.** 효과음은 PCM(`ATR`), 배경음은 MIDI(`MTR`)다. WIE CLI는 MIDI를 포트로만 보내므로 macOS에서는 `work/play.sh`(FluidSynth + WIE `assets/1mgm.sf2`)로 실행해야 배경음이 난다. 음표 전달은 확인, 음색 품질은 사람이 판단. `wie-app`의 Android·Windows 배경음 경로는 미확인(Apple은 `wie-app/src/audio/apple.rs`가 같은 사운드폰트를 쓴다).
+- **소리.** 효과음은 PCM(`ATR`), 배경음은 MIDI(`MTR`)다. WIE CLI는 MIDI를 포트로만 보내므로 macOS에서는 FluidSynth와 WIE `assets/1mgm.sf2`를 함께 띄워야 배경음이 난다(실행 스크립트 `work/play.sh`는 네이티브 빌드로 바뀌며 지웠다). 음표 전달은 확인, 음색 품질은 사람이 판단. `wie-app`의 Android·Windows 배경음 경로는 미확인(Apple은 `wie-app/src/audio/apple.rs`가 같은 사운드폰트를 쓴다).
 - **인증.** 게임이 `CERTIDATA` 파일을 쓴다. 온라인 인증이나 서버 접속이 진행을 막는지 미확인(`OffRun:0`의 의미도 미확인).
 
 ## SDL3 전체화면 (2026-10-31)
 
-- WIE 포크 `src/cli/window.rs`를 winit/softbuffer에서 SDL3(`sdl3-sys`, 정적 빌드)로 교체했다. `work/play.sh`로 실행하면 전체화면이고, 게임 폭은 모니터 비율로 자동 계산한다(MacBook 16:10 = 512). 원본 zip 그대로 쓰며 `work/wide/*.zip`은 더 필요 없다.
+- WIE 포크 `src/cli/window.rs`를 winit/softbuffer에서 SDL3(`sdl3-sys`, 정적 빌드)로 교체했다. WIE CLI로 실행하면 전체화면이고, 게임 폭은 모니터 비율로 자동 계산한다(MacBook 16:10 = 512). 원본 zip 그대로 쓰며 `work/wide/*.zip`은 더 필요 없다.
 - 옵션: `--windowed`(원래 크기 창), `--game-width N`. F11 전체화면 전환, macOS 종료는 Cmd+Q.
 - 게임 코드는 여전히 WIE가 ARM 코드로 실행한다. C 소스 복원이나 재컴파일이 아니다. SDL3는 창·입력·표시만 맡고 소리는 기존 경로(rodio, MIDI)다.
 
@@ -62,7 +62,7 @@
 ### 타이틀 검은 블록 분석 (2026-10-31, 미해결)
 
 - 증상: 512 폭 타이틀에서 검은 블록이 프레임마다 위치를 바꾼다(오른쪽 아래 x≈420~512, y≈104~320 / 왼쪽 위 x=0~50, y=0~105). 구름 층이 스크롤하다 생기는 틈으로 추정(UNVERIFIED). 그리는 함수는 아직 못 찾았다.
-- 도구: `WIE_CTRL=<파일>`(WIE 포크 `src/cli/ctrl.rs`, 미커밋)로 `key <이름>`, `shot <ppm>`, `quit`. 실행 예 `work/tools/title.sh <zip> <출력폴더> ok ok`, 변환 `work/tools/ppm2png.py`.
+- 도구: `WIE_CTRL=<파일>`(WIE 포크 `src/cli/ctrl.rs`, 미커밋)로 `key <이름>`, `shot <ppm>`, `quit`. 실행 예 `WIE_BIN=<wie 실행 파일> work/tools/apitrace.sh <zip> <출력폴더> ok ok`, 변환 `work/tools/ppm2png.py`.
 - 디컴파일: `work/decomp/all.c`(함수 2,669개, 재생성은 `work/tools/DumpThumb.java`). Ghidra는 `JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home`, `-processor ARM:LE:32:v4t`, base 0x100000. 함수 시작을 push-lr로만 잡아서 누락이 있을 수 있다.
 - 알아낸 것: 전역 구조체 `+0x48`/`+0x4c` = 화면 폭/높이, 읽는 함수 77개. 원작에 `폭 < 0xfb` 분기와 `min(폭, 240)` 고정 UI 코드(`0x11d2b0`, `0x11c9dc`, `0x11e83c`)가 있다. 즉 넓은 화면을 어느 정도 고려했다.
 - 막힌 방법: 리소스 문자열 정적 참조 검색, `--profile-out`(네이티브 실행에서는 게임 주소가 안 잡힘).
@@ -186,7 +186,7 @@ Ghidra `decomp/all.c` 품질(현재 프로젝트 그대로):
 | 정적 분석 | Ghidra 12.2 | `/opt/homebrew/opt/ghidra/libexec/support/analyzeHeadless`. 프로젝트는 `work/ghidra` |
 | Java | OpenJDK 25 (Ghidra용, 21은 미지원) | `JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home` |
 | Android | SDK 35, build-tools 35, NDK 27.2, adb | `ANDROID_HOME=/opt/homebrew/share/android-commandlinetools` |
-| 분석 스크립트 | capstone, unicorn, pyelftools, pillow, fonttools | `~/private/reverse/tools/venv` |
+| 분석 스크립트 | capstone, unicorn, pyelftools, pillow, fonttools | 저장소 루트 `pyproject.toml`, `uv.lock`(`uv run python <도구>`) |
 | 빌드 | cmake, ninja, SDL3, mingw-w64, binutils | Homebrew |
 | Windows 시험 | UTM | Windows 게스트는 아직 없음 |
 

@@ -1,8 +1,8 @@
 #!/bin/zsh
-# apitrace.sh <zip> <outdir> [keys...]: 세이브를 건드리지 않도록 임시 HOME에서 WIE를 띄워 WIPI 호출을 기록한다.
+# apitrace.sh <zip> <outdir> [keys...]: (WIE_BIN=<wie 실행 파일>) 세이브를 건드리지 않도록 임시 HOME에서 WIE를 띄워 WIPI 호출을 기록한다.
 # 키 사이 대기는 waitN. 프레임은 outdir/sN.ppm, 호출 집계는 outdir/calls.txt("횟수 id 호출지").
 ZIP=$1; OUT=$2; shift 2; mkdir -p $OUT/home; CTL=$OUT/ctrl.txt; rm -f $CTL
-BIN=$HOME/private/reverse/tools/wie/target/release/wie
+BIN=${WIE_BIN:?WIE_BIN에 wie 실행 파일 경로를 준다}
 { HOME=$OUT/home RUST_LOG=wie_ktf::runtime::wipi_c=trace WIE_CTRL=$CTL $BIN --windowed $ZIP 2>&1 >/dev/null \
   | grep --line-buffered -a 'wipic call' | sed -E 's/.*wipic call (0x[0-9a-f]+) from (0x[0-9a-f]+).*/\1 \2/' > $OUT/raw.txt } &
 sleep 8

@@ -1,0 +1,17 @@
+# 빌드와 분석에 쓰는 파이썬 도구(work/tools, native/android)의 의존성. 판은 uv.lock에 고정한다.
+# 빌드가 쓰는 것: capstone(codemap.py, thumb2c.py), fonttools(hnf2ttf.py), pillow(mkicon.py).
+# 분석 도구가 쓰는 것: unicorn(trial.py), pyelftools.
+[project]
+name = "chronos-wing-tools"
+version = "0"
+requires-python = ">=3.12"
+dependencies = [
+    "capstone>=5,<6",
+    "fonttools>=4.50",
+    "pillow>=11",
+    "pyelftools>=0.31",
+    "unicorn>=2.1,<3",
+]
+
+[tool.uv]
+package = false

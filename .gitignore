@@ -25,3 +25,6 @@ __pycache__/
 
 # Android 서명 키
 native/android/*.keystore
+
+# uv가 만드는 파이썬 환경
+.venv/
