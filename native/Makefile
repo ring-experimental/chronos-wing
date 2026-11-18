@@ -1,5 +1,5 @@
 # 크로노스 윙 네이티브 빌드.
-# 이 저장소에는 게임 원본이 없다. 원본(크로노스윙.zip)은 가진 사람이 저장소 루트에 직접 두며 .gitignore가 막는다.
+# 이 저장소에는 게임 원본이 없다. 원본(크로노스윙.zip)은 가진 사람이 저장소 루트에 직접 두며 .gitignore가 막는다. 다른 곳에 있으면 make ZIP=<경로>.
 # - all, windows, android, mac: 그 zip에서 코드와 데이터를 꺼내 쓴다. build/의 결과물은 원본 파생물이라 올리지 않는다.
 # - interp_gen, web: zip 없이 빌드된다. 웹 빌드는 실행할 때 사용자가 고른 원본 파일을 브라우저에서 읽는다.
 # 이 기계에만 맞는 경로는 적지 않는다. 도구는 PATH에서 찾고, 다른 곳에 있으면 make 변수로 넘긴다(PY, CARGO, SDL_CFLAGS, SDL_LIBS).
@@ -8,7 +8,7 @@ ROOT := $(abspath ..)
 # 파이썬 도구(capstone, fonttools)는 uv가 uv.lock대로 맞춘 환경에서 돌린다.
 PY ?= uv run --project $(ROOT) python
 CARGO ?= cargo
-ZIP := $(ROOT)/크로노스윙.zip
+ZIP ?= $(ROOT)/크로노스윙.zip
 B := build
 GAME := $(B)/game
 HOSTSRC := $(wildcard host/*.c)

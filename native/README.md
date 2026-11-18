@@ -31,6 +31,7 @@ build/chronos build/game                   # 전체화면(폭은 모니터 비�
 | 파이썬 도구(capstone, fonttools, pillow) | 저장소 루트 `pyproject.toml`, `uv.lock` | `make PY=<파이썬>` |
 | FreeType, RmlUi, SDL3(web, android, windows) | `deps.sh`(판과 sha256). 없으면 받아 `build/deps`에 둔다 | |
 | SDL3(맥) | 설치된 것. pkg-config, 없으면 `brew --prefix` | `make SDL_CFLAGS=... SDL_LIBS=...` |
+| 원본 zip | 저장소 루트의 `크로노스윙.zip` | `make ZIP=<경로>` |
 | Android SDK, NDK, JDK | NDK 27.2, build-tools 35, JDK 21 | `ANDROID_HOME`, `ANDROID_NDK_HOME`, `JAVA_HOME` |
 
 키: 방향키, Space/Enter=OK, Shift 좌/우=소프트키, Backspace=CLEAR, 123/QWE/ASD/ZXC=숫자 키패드. 입력 칸(닉네임, 편지, 검색)이 열리면 키보드는 글자 입력이 되고 OS 입력기로 한글을 친다. 방향키, Enter, Backspace만 게임으로 간다. Android는 화면 키보드가 뜬다.
